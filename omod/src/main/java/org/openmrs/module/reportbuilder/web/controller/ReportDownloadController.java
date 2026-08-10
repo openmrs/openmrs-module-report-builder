@@ -60,7 +60,7 @@ public class ReportDownloadController {
 	 * Download report as Excel file
 	 * 
 	 * @param request HTTP request
-	 * @param uuid Report definition UUID (required)
+	 * @param reportDefinitionUuid Report definition UUID (required)
 	 * @param endDate Report end date (optional)
 	 * @return Excel file download or error response
 	 */
@@ -127,7 +127,7 @@ public class ReportDownloadController {
 	 * Download report as CSV file
 	 * 
 	 * @param request HTTP request
-	 * @param uuid Report definition UUID (required)
+	 * @param reportDefinitionUuid Report definition UUID (required)
 	 * @return CSV file download or error response
 	 */
 	@RequestMapping(method = RequestMethod.GET, params = "format=csv")

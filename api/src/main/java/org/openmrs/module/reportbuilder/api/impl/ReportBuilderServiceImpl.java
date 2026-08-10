@@ -997,8 +997,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		reportDefinition.getParameters().clear();
 		reportDefinition.getDataSetDefinitions().clear();
 		
-		// Declare parameters from the compiled config (type-mapped), guaranteeing startDate/endDate
-		// since the evaluator's date-placeholder substitution relies on them.
+		// Declare parameters from the compiled config (type-mapped). All parameters are driven
+		// by the JSON config - no hardcoded defaults since not all reports require date ranges.
 		List<Parameter> declaredParameters = new ArrayList<Parameter>();
 		JsonNode parameters = compiledConfig.path("parameters");
 		if (parameters.isArray() && parameters.size() > 0) {
@@ -1013,8 +1013,6 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				    param.path("label").asText(paramName), mapParameterTypeToClass(param.path("type").asText("DATE")));
 			}
 		}
-		declareLinelistParameter(declaredParameters, reportDefinition, "startDate", "Start Date", Date.class);
-		declareLinelistParameter(declaredParameters, reportDefinition, "endDate", "End Date", Date.class);
 		
 		for (Parameter p : declaredParameters) {
 			dsd.addParameter(p);

@@ -8,9 +8,10 @@ import java.util.Locale;
 /**
  * Core Indicator model. This single entity supports: - BASE (SQL-based indicator definition) -
  * COMPOSITE (logical composition of other indicators) - FINAL (disaggregated/tabular output
- * definition) Authoring configuration is stored in configJson (building block for future
- * improvements). Generated/executable SQL is stored in sqlTemplate / denominatorSqlTemplate for
- * fast runtime use. Independent of OpenMRS Reporting module.
+ * definition) - CUSTOM (complex indicators with custom business logic and SQL) Authoring
+ * configuration is stored in configJson (building block for future improvements).
+ * Generated/executable SQL is stored in sqlTemplate / denominatorSqlTemplate for fast runtime use.
+ * Independent of OpenMRS Reporting module.
  */
 @Entity
 @Table(name = "report_builder_indicator", indexes = {
@@ -182,6 +183,10 @@ public class ReportBuilderIndicator extends BaseOpenmrsMetadata {
 		return kind == Kind.FINAL;
 	}
 	
+	public boolean isCustom() {
+		return kind == Kind.CUSTOM;
+	}
+	
 	public String getKindLower() {
 		return kind == null ? "" : kind.name().toLowerCase(Locale.ROOT);
 	}
@@ -191,7 +196,7 @@ public class ReportBuilderIndicator extends BaseOpenmrsMetadata {
 	// =====================================================
 	
 	public enum Kind {
-		BASE, COMPOSITE, FINAL
+		BASE, COMPOSITE, FINAL, CUSTOM
 	}
 	
 	public enum ValueType {

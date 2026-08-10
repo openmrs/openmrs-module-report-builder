@@ -1,5 +1,8 @@
 package org.openmrs.module.reportbuilder.web.resource;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.openmrs.api.context.Context;
 import org.openmrs.module.reporting.report.definition.ReportDefinition;
 import org.openmrs.module.reportbuilder.api.ReportBuilderService;
@@ -87,9 +90,9 @@ public class ReportBuilderReportCompileResource extends DelegatingCrudResource<R
 					}
 					// Ensure sourceType remains BUILDER for compiled reports
 					existingEntry.setSourceType(ReportLibrary.ReportSourceType.BUILDER);
-					// Update compiled config (including parameters) in metaJson for frontend UI rendering
+					// Update parameters in metaJson for frontend UI rendering
 					if (result.getCompiledJson() != null) {
-						existingEntry.setMetaJson(result.getCompiledJson());
+						existingEntry.setMetaJson(extractParametersMetaJson(result.getCompiledJson()));
 					}
 					ReportBuilderService.saveReportLibrary(existingEntry);
 					out.setAddedToLibrary(Boolean.TRUE);
@@ -109,9 +112,9 @@ public class ReportBuilderReportCompileResource extends DelegatingCrudResource<R
 					        : org.openmrs.module.reportbuilder.model.ReportBuilderReport.ReportType.AGGREGATE);
 					reportLibrary.setMigrated(Boolean.FALSE);
 					
-					// Store compiled config (including parameters) in metaJson for frontend UI rendering
+					// Store parameters in metaJson for frontend UI rendering
 					if (result.getCompiledJson() != null) {
-						reportLibrary.setMetaJson(result.getCompiledJson());
+						reportLibrary.setMetaJson(extractParametersMetaJson(result.getCompiledJson()));
 					}
 					
 					ReportLibrary saved = ReportBuilderService.saveReportLibrary(reportLibrary);
@@ -183,5 +186,34 @@ public class ReportBuilderReportCompileResource extends DelegatingCrudResource<R
 	@Override
 	public DelegatingResourceDescription getUpdatableProperties() {
 		return null;
+	}
+	
+	/**
+	 * Extracts only the parameters array from the compiled report JSON and returns it as a minimal
+	 * metaJson object { "parameters": [...] }. This prevents the full report definition from being
+	 * stored in metaJson, which should only contain metadata.
+	 */
+	private String extractParametersMetaJson(String compiledJson) {
+		if (compiledJson == null || compiledJson.trim().isEmpty()) {
+			return "{}";
+		}
+		
+		try {
+			ObjectMapper mapper = new ObjectMapper();
+			JsonNode rootNode = mapper.readTree(compiledJson);
+			JsonNode parametersNode = rootNode.path("parameters");
+			
+			// Create a minimal metaJson with only parameters
+			ObjectNode metaJsonNode = mapper.createObjectNode();
+			if (parametersNode != null && parametersNode.isArray() && parametersNode.size() > 0) {
+				metaJsonNode.set("parameters", parametersNode);
+			}
+			
+			return mapper.writeValueAsString(metaJsonNode);
+		}
+		catch (Exception e) {
+			// If parsing fails, return empty object
+			return "{}";
+		}
 	}
 }
