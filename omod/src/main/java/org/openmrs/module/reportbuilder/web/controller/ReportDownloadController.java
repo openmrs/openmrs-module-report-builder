@@ -61,7 +61,6 @@ public class ReportDownloadController {
 	 * 
 	 * @param request HTTP request
 	 * @param reportDefinitionUuid Report definition UUID (required)
-	 * @param endDate Report end date (optional)
 	 * @return Excel file download or error response
 	 */
 	@ExceptionHandler(APIAuthenticationException.class)

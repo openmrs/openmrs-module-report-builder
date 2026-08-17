@@ -2,6 +2,7 @@ package org.openmrs.module.reportbuilder.api.db;
 
 import org.openmrs.module.reportbuilder.dto.SqlPreviewResult;
 import org.openmrs.module.reportbuilder.model.ETLSource;
+import org.openmrs.module.reportbuilder.model.ETLMonitor;
 import org.openmrs.module.reportbuilder.model.LegacyReport;
 import org.openmrs.module.reportbuilder.model.LegacyReportConfig;
 import org.openmrs.module.reportbuilder.model.ReportBuilderAgeCategory;
@@ -172,4 +173,26 @@ public interface ReportBuilderDAO {
 	int getLegacyReportCount();
 	
 	void deleteLegacyReport(String uuid);
+	
+	// =========================================================
+	// ETLMonitor CRUD methods
+	// =========================================================
+	
+	ETLMonitor saveETLMonitor(ETLMonitor monitor);
+	
+	ETLMonitor getETLMonitorById(Integer id);
+	
+	ETLMonitor getETLMonitorByUuid(String uuid);
+	
+	ETLMonitor getETLMonitorByCode(String code);
+	
+	List<ETLMonitor> getETLMonitors(String qStr, boolean includeRetired, Integer startIndex, Integer limit);
+	
+	List<ETLMonitor> getETLMonitorsByCategory(String category, boolean includeRetired);
+	
+	List<ETLMonitor> getActiveETLMonitors();
+	
+	long getETLMonitorsCount(String qStr, boolean includeRetired);
+	
+	void purgeETLMonitor(ETLMonitor monitor);
 }

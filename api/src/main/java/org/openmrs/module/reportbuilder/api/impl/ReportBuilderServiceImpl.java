@@ -3126,4 +3126,70 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			throw new org.openmrs.api.APIException("Failed to convert LegacyReportConfig to LegacyReport", e);
 		}
 	}
+	
+	// =========================================================
+	// ETLMonitor CRUD methods
+	// =========================================================
+	
+	@Override
+	public ETLMonitor saveETLMonitor(ETLMonitor monitor) {
+		if (monitor.getUuid() == null) {
+			monitor.setUuid(UUID.randomUUID().toString());
+		}
+		return dao.saveETLMonitor(monitor);
+	}
+	
+	@Override
+	public ETLMonitor getETLMonitorById(Integer id) {
+		return dao.getETLMonitorById(id);
+	}
+	
+	@Override
+	public ETLMonitor getETLMonitorByUuid(String uuid) {
+		return dao.getETLMonitorByUuid(uuid);
+	}
+	
+	@Override
+	public ETLMonitor getETLMonitorByCode(String code) {
+		return dao.getETLMonitorByCode(code);
+	}
+	
+	@Override
+	public List<ETLMonitor> getETLMonitors(String q, boolean includeRetired, Integer startIndex, Integer limit) {
+		return dao.getETLMonitors(q, includeRetired, startIndex, limit);
+	}
+	
+	@Override
+	public List<ETLMonitor> getActiveETLMonitors() {
+		return dao.getActiveETLMonitors();
+	}
+	
+	@Override
+	public List<ETLMonitor> getETLMonitorsByCategory(String category, boolean includeRetired) {
+		return dao.getETLMonitorsByCategory(category, includeRetired);
+	}
+	
+	@Override
+	public long getETLMonitorsCount(String q, boolean includeRetired) {
+		return dao.getETLMonitorsCount(q, includeRetired);
+	}
+	
+	@Override
+	public void retireETLMonitor(ETLMonitor monitor, String reason) {
+		monitor.setRetired(true);
+		monitor.setRetireReason(reason);
+		dao.saveETLMonitor(monitor);
+	}
+	
+	@Override
+	public void unretireETLMonitor(ETLMonitor monitor) {
+		monitor.setRetired(false);
+		monitor.setRetireReason(null);
+		dao.saveETLMonitor(monitor);
+	}
+	
+	@Override
+	public void purgeETLMonitor(ETLMonitor monitor) {
+		dao.purgeETLMonitor(monitor);
+	}
 }

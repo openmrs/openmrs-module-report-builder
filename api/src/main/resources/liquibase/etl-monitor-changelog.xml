@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                   http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="reportbuilder-20260814-01-etl-monitor" author="slubwama">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="report_builder_etl_monitor"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="report_builder_etl_monitor">
+            <!-- Primary Key -->
+            <column name="etl_monitor_id" type="INT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+
+            <!-- OpenMRS BaseOpenmrsMetadata Fields -->
+            <column name="uuid" type="VARCHAR(38)">
+                <constraints nullable="false" unique="true"/>
+            </column>
+
+            <column name="name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="description" type="TEXT"/>
+
+            <column name="creator" type="INT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="date_created" type="DATETIME">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="changed_by" type="INT"/>
+            <column name="date_changed" type="DATETIME"/>
+
+            <column name="retired" type="BIT(1)" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="retired_by" type="INT"/>
+            <column name="date_retired" type="DATETIME"/>
+            <column name="retire_reason" type="VARCHAR(255)"/>
+
+            <!-- ETLMonitor-specific Fields -->
+            <column name="code" type="VARCHAR(100)"/>
+
+            <column name="monitor_type" type="VARCHAR(30)" defaultValue="STATUS_CARD">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="config_json" type="LONGTEXT"/>
+
+            <column name="display_config_json" type="LONGTEXT"/>
+
+            <column name="refresh_interval" type="INT" defaultValueNumeric="30"/>
+
+            <column name="timeout" type="INT" defaultValueNumeric="10"/>
+
+            <column name="active" type="BIT(1)" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="category" type="VARCHAR(100)"/>
+
+            <column name="sort_order" type="INT" defaultValueNumeric="0"/>
+        </createTable>
+
+        <!-- Foreign Keys -->
+        <addForeignKeyConstraint
+                baseTableName="report_builder_etl_monitor"
+                baseColumnNames="creator"
+                referencedTableName="users"
+                referencedColumnNames="user_id"
+                constraintName="fk_etl_monitor_creator"/>
+
+        <addForeignKeyConstraint
+                baseTableName="report_builder_etl_monitor"
+                baseColumnNames="changed_by"
+                referencedTableName="users"
+                referencedColumnNames="user_id"
+                constraintName="fk_etl_monitor_changed_by"/>
+
+        <addForeignKeyConstraint
+                baseTableName="report_builder_etl_monitor"
+                baseColumnNames="retired_by"
+                referencedTableName="users"
+                referencedColumnNames="user_id"
+                constraintName="fk_etl_monitor_retired_by"/>
+
+        <!-- Indexes -->
+        <createIndex tableName="report_builder_etl_monitor"
+                     indexName="idx_etl_monitor_uuid"
+                     unique="true">
+            <column name="uuid"/>
+        </createIndex>
+
+        <createIndex tableName="report_builder_etl_monitor"
+                     indexName="idx_etl_monitor_code">
+            <column name="code"/>
+        </createIndex>
+
+        <createIndex tableName="report_builder_etl_monitor"
+                     indexName="idx_etl_monitor_active">
+            <column name="active"/>
+        </createIndex>
+
+        <createIndex tableName="report_builder_etl_monitor"
+                     indexName="idx_etl_monitor_category">
+            <column name="category"/>
+        </createIndex>
+
+        <createIndex tableName="report_builder_etl_monitor"
+                     indexName="idx_etl_monitor_retired">
+            <column name="retired"/>
+        </createIndex>
+
+        <createIndex tableName="report_builder_etl_monitor"
+                     indexName="idx_etl_monitor_type">
+            <column name="monitor_type"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

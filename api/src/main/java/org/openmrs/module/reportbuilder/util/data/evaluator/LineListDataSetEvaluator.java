@@ -46,10 +46,11 @@ import java.util.*;
  * <li>Creating columns from the dataSetDefinitions</li>
  * <li>Evaluating each column for each patient</li>
  * </ol>
- * SQL and CALCULATION columns are evaluated per-patient via direct SQL execution. Typed OpenMRS
- * data definitions (PERSON_NAME, PERSON_ATTRIBUTE, PERSON_ADDRESS, IDENTIFIER, GENDER, BIRTHDATE)
- * are evaluated once over the whole patient cohort via the reporting module's PatientDataService /
- * PersonDataService and looked up per row.
+ * SQL and CALCULATION columns are evaluated per-patient via direct SQL execution, with optimization
+ * to batch same-table columns into single queries. Typed OpenMRS data definitions (PERSON_NAME,
+ * PERSON_ATTRIBUTE, PERSON_ADDRESS, IDENTIFIER, GENDER, BIRTHDATE) are evaluated once over the
+ * whole patient cohort via the reporting module's PatientDataService / PersonDataService and looked
+ * up per row.
  */
 @Handler(supports = { LineListDataSetDefinition.class })
 public class LineListDataSetEvaluator implements DataSetEvaluator {
@@ -62,6 +63,9 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 	private final GenericDataDefinitionResolver dataDefinitionResolver;
 	
 	private final GenericConverterResolver converterResolver;
+	
+	// Store filter values extracted from base cohort execution
+	private FilterValues filterValues;
 	
 	public LineListDataSetEvaluator() {
 		this.dataDefinitionResolver = new GenericDataDefinitionResolver();
@@ -88,6 +92,14 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 			LegacyGenericReportSchema.ReportDefinition reportConfig = objectMapper.readValue(reportDesign,
 			    LegacyGenericReportSchema.ReportDefinition.class);
 			
+			// Initialize filter values from base cohort configuration
+			Map<String, String> filterMap = reportConfig.getBaseCohortDefinition() != null ? reportConfig
+			        .getBaseCohortDefinition().getFilterMap() : new HashMap<String, String>();
+			this.filterValues = new FilterValues(filterMap);
+			
+			// Get base cohort SQL for filter extraction
+			String baseCohortSql = getBaseCohortSql(reportConfig);
+			
 			// Get patient IDs from base cohort definition
 			Set<Integer> patientIds = getPatientIdsFromBaseCohort(reportConfig, evaluationContext);
 			
@@ -106,8 +118,13 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 			Map<String, ColumnDefinition> columns = buildColumnDefinitions(patientDataSet);
 			
 			// Pre-evaluate typed data definitions once over the whole cohort (one service call each).
-			// SQL / CALCULATION columns are intentionally excluded here; they run per-patient below.
 			Map<String, Map<Integer, Object>> columnValueMaps = preEvaluateColumns(columns, evaluationContext);
+			
+			// Pre-evaluate SQL columns using batched queries for same-table columns
+			Map<String, Map<Integer, Object>> sqlColumnValues = preEvaluateSqlColumns(columns, patientIds,
+			    evaluationContext, baseCohortSql);
+			// Merge SQL values into the main column value map
+			columnValueMaps.putAll(sqlColumnValues);
 			
 			PatientDataHelper pdh = new PatientDataHelper();
 			
@@ -143,17 +160,151 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 	}
 	
 	/**
-	 * Resolves a single column's value for a patient. SQL / CALCULATION columns execute per-patient
-	 * SQL; typed columns look up their pre-evaluated cohort value and unwrap it to a display value.
+	 * Resolves a single column's value for a patient. First checks for pre-fetched values (from
+	 * batched SQL or typed cohort evaluation), then falls back to per-patient SQL execution if
+	 * needed.
 	 */
 	private Object resolveColumnValue(ColumnDefinition colDef, Integer patientId, EvaluationContext context,
-	        Map<Integer, Object> typedValues) {
+	        Map<Integer, Object> preFetchedValues) {
+		// Check if we have pre-fetched values (from batched SQL or typed cohort evaluation)
+		if (preFetchedValues != null && preFetchedValues.containsKey(patientId)) {
+			return unwrapValue(preFetchedValues.get(patientId), colDef);
+		}
+		
+		// Fallback: evaluate SQL column individually (for non-batchable columns)
 		DataDefinition dataDef = colDef.getDataDefinition();
 		if (isSqlPatientDataDefinition(dataDef)) {
 			return evaluateSqlPatientDataDefinition(dataDef, patientId, context);
 		}
-		Object value = typedValues != null ? typedValues.get(patientId) : null;
-		return unwrapValue(value, colDef);
+		
+		return null;
+	}
+	
+	/**
+	 * Pre-evaluates SQL columns using batched queries. Groups compatible SQL columns together and
+	 * executes a single query per patient per group instead of one query per column per patient.
+	 * 
+	 * @param columns All column definitions
+	 * @param patientIds Patient IDs to evaluate for
+	 * @param context Evaluation context with parameter values
+	 * @param baseCohortSql Base cohort SQL to extract filters from for data consistency
+	 * @return Map of columnKey -> patientId -> value
+	 */
+	private Map<String, Map<Integer, Object>> preEvaluateSqlColumns(Map<String, ColumnDefinition> columns,
+	        Set<Integer> patientIds, EvaluationContext context, String baseCohortSql) {
+
+		// Step 1: Extract all SQL columns
+		List<SqlColumnDefinition> sqlColumns = extractSqlColumns(columns);
+		if (sqlColumns.isEmpty()) {
+			return Collections.emptyMap();
+		}
+
+		log.info("Found {} SQL columns, attempting batched evaluation", sqlColumns.size());
+
+		// Step 2: Group SQL columns by their query pattern, including base cohort filters
+		Map<String, SqlQueryAnalyzer.SqlColumnGroup> groups = SqlQueryAnalyzer.groupSqlColumns(sqlColumns,
+		    baseCohortSql);
+		log.info("Grouped into {} batch groups", groups.size());
+
+		// Step 3: Execute batched queries for each group
+		for (SqlQueryAnalyzer.SqlColumnGroup group : groups.values()) {
+			executeBatchedQuery(group, patientIds, context);
+		}
+
+		// Step 4: Build result map from evaluated values
+		Map<String, Map<Integer, Object>> result = new HashMap<>();
+		for (SqlColumnDefinition sqlCol : sqlColumns) {
+			if (sqlCol.isBatchable() && sqlCol.getGroup() != null) {
+				// This column was batched - use the pre-fetched values directly
+				result.put(sqlCol.getColumnKey(), sqlCol.getEvaluatedValues());
+			}
+		}
+
+		return result;
+	}
+	
+	/**
+	 * Extracts all SQL column definitions from the column map.
+	 */
+	private List<SqlColumnDefinition> extractSqlColumns(Map<String, ColumnDefinition> columns) {
+		List<SqlColumnDefinition> sqlColumns = new ArrayList<>();
+		for (Map.Entry<String, ColumnDefinition> entry : columns.entrySet()) {
+			ColumnDefinition colDef = entry.getValue();
+			DataDefinition dataDef = colDef.getDataDefinition();
+			if (isSqlPatientDataDefinition(dataDef)) {
+				try {
+					String sql = (String) dataDef.getClass().getMethod("getSql").invoke(dataDef);
+					sqlColumns.add(new SqlColumnDefinition(entry.getKey(), colDef.getName(), dataDef,
+					    decodeHtmlEntities(sql)));
+				}
+				catch (Exception e) {
+					log.warn("Could not extract SQL for column {}: {}", entry.getKey(), e.getMessage());
+				}
+			}
+		}
+		return sqlColumns;
+	}
+	
+	/**
+	 * Executes a batched query for a column group, fetching values for all patients at once.
+	 * Results are distributed back to individual column definitions.
+	 */
+	private void executeBatchedQuery(SqlQueryAnalyzer.SqlColumnGroup group, Set<Integer> patientIds,
+	        EvaluationContext context) {
+		
+		String combinedQueryTemplate = group.buildCombinedQuery();
+		
+		log.debug("Executing batched query for group with {} columns across {} patients", group.getColumns().size(),
+		    patientIds.size());
+		
+		// Track query count for logging
+		int queryCount = 0;
+		
+		for (Integer patientId : patientIds) {
+			try {
+				// Replace :patientId in the combined query
+				String query = combinedQueryTemplate.replace(":patientId", String.valueOf(patientId));
+				
+				// Replace filterMap parameters with patient-specific values
+				if (filterValues != null && !filterValues.isEmpty()) {
+					query = filterValues.applyToQuery(query, patientId);
+				}
+				
+				// Replace other parameters (dates, etc.)
+				query = replaceParameterPlaceholders(query, context);
+				
+				// Execute the query
+				SqlQueryBuilder queryBuilder = new SqlQueryBuilder(query);
+				List<Object[]> results = evaluationService.evaluateToList(queryBuilder, context);
+				queryCount++;
+				
+				if (results != null && !results.isEmpty()) {
+					Object[] row = results.get(0);
+					// row[0] is patient_id, row[1+] are the column values
+					
+					// Distribute each column value to its respective SqlColumnDefinition
+					for (SqlColumnDefinition sqlCol : group.getColumns()) {
+						int colIndex = sqlCol.getGroupIndex() + 1; // +1 because row[0] is patient_id
+						Object value = (colIndex < row.length) ? row[colIndex] : null;
+						sqlCol.setEvaluatedValue(patientId, value);
+					}
+				} else {
+					// No results for this patient - set null for all columns
+					for (SqlColumnDefinition sqlCol : group.getColumns()) {
+						sqlCol.setEvaluatedValue(patientId, null);
+					}
+				}
+			}
+			catch (Exception e) {
+				log.error("Failed to execute batched query for patient {}: {}", patientId, e.getMessage());
+				// Set null for all columns for this patient
+				for (SqlColumnDefinition sqlCol : group.getColumns()) {
+					sqlCol.setEvaluatedValue(patientId, null);
+				}
+			}
+		}
+		
+		log.info("Executed {} queries for {} columns (batched)", queryCount, group.getColumns().size());
 	}
 	
 	/**
@@ -172,7 +323,7 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 			ColumnDefinition colDef = entry.getValue();
 			DataDefinition dataDef = colDef.getDataDefinition();
 			if (isSqlPatientDataDefinition(dataDef)) {
-				continue; // handled per-patient by SQL execution
+				continue; // handled by batched SQL evaluation
 			}
 			Map<Integer, Object> values;
 			try {
@@ -269,7 +420,30 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 	}
 	
 	/**
-	 * Get patient IDs from the base cohort definition SQL
+	 * Extract the base cohort SQL for filter extraction. This is used to ensure data consistency by
+	 * including the base cohort's WHERE conditions in batched column queries.
+	 */
+	private String getBaseCohortSql(LegacyGenericReportSchema.ReportDefinition reportConfig) {
+		LegacyGenericReportSchema.BaseCohortDefinition baseCohort = reportConfig.getBaseCohortDefinition();
+		if (baseCohort == null) {
+			return null;
+		}
+		
+		if (!"SQL".equalsIgnoreCase(baseCohort.getType())) {
+			return null;
+		}
+		
+		Map<String, Object> config = baseCohort.getConfig();
+		if (config == null || !config.containsKey("sql")) {
+			return null;
+		}
+		
+		return (String) config.get("sql");
+	}
+	
+	/**
+	 * Get patient IDs from the base cohort definition SQL, and extract filter values if filterMap
+	 * is configured.
 	 */
 	private Set<Integer> getPatientIdsFromBaseCohort(LegacyGenericReportSchema.ReportDefinition reportConfig,
 	        EvaluationContext context) {
@@ -294,6 +468,9 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 		// Replace all parameter placeholders with resolved values from EvaluationContext
 		sql = replaceParameterPlaceholders(sql, context);
 		
+		// Extract column mappings for filter values if filterMap is present
+		Map<Integer, String> columnMappings = SelectClauseParser.extractColumnMappings(sql, filterValues.getFilterMap());
+		
 		try {
 			SqlQueryBuilder queryBuilder = new SqlQueryBuilder(sql);
 			List<Object[]> results = evaluationService.evaluateToList(queryBuilder, context);
@@ -301,15 +478,24 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 			for (Object[] row : results) {
 				if (row != null && row.length > 0) {
 					Object id = row[0];
+					Integer patientId = null;
+					
 					if (id instanceof Number) {
-						patientIds.add(((Number) id).intValue());
+						patientId = ((Number) id).intValue();
+						patientIds.add(patientId);
 					} else if (id != null) {
 						try {
-							patientIds.add(Integer.parseInt(id.toString()));
+							patientId = Integer.parseInt(id.toString());
+							patientIds.add(patientId);
 						}
 						catch (NumberFormatException e) {
 							log.warn("Could not parse patient ID: {}", id);
 						}
+					}
+					
+					// Extract filter values for this patient
+					if (patientId != null && !columnMappings.isEmpty()) {
+						filterValues.addValues(patientId, row, columnMappings);
 					}
 				}
 			}
@@ -436,7 +622,8 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 	}
 	
 	/**
-	 * Evaluate a SqlPatientDataDefinition for a specific patient
+	 * Evaluate a SqlPatientDataDefinition for a specific patient (fallback for non-batchable
+	 * columns)
 	 */
 	private Object evaluateSqlPatientDataDefinition(DataDefinition dataDef, Integer patientId, EvaluationContext context) {
 		try {

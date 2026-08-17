@@ -198,7 +198,70 @@ public class LegacyGenericReportSchema {
 	}
 	
 	/**
-	 * Base cohort definition
+	 * Base cohort definition with optional filterMap for data consistency.
+	 * <p>
+	 * The filterMap allows column queries to reference specific identifiers from the base cohort
+	 * result set, ensuring data consistency when multiple rows exist per patient.
+	 * <p>
+	 * <b>Example:</b>
+	 * 
+	 * <pre>
+	 * {
+	 *   "type": "SQL",
+	 *   "name": "Patient Cohort",
+	 *   "config": {
+	 *     "sql": "SELECT DISTINCT vl.patient_id, episode_id, native_order_id
+	 *             FROM mamba_fact_viral_load_episode vl
+	 *             WHERE vl.accession_number IS NOT NULL
+	 *               AND vl.order_date BETWEEN :startDate AND :endDate",
+	 *     "filterMap": {
+	 *       "patientId": "vl.patient_id",
+	 *       "orderId": "vl.native_order_id",
+	 *       "episodeId": "vl.episode_id"
+	 *     }
+	 *   }
+	 * }
+	 * </pre>
+	 * <p>
+	 * <b>Frontend Instructions:</b>
+	 * <ul>
+	 * <li>Add filterMap to config when the base cohort SELECTs multiple identifier columns</li>
+	 * <li>Each key in filterMap becomes a parameter available to column queries (e.g., :orderId)</li>
+	 * <li>The value should be the column reference (can include table alias)</li>
+	 * <li>Column SQL can then use these parameters to filter to the exact matched row</li>
+	 * <li>Use consistent parameter naming - filterMap keys should match the parameter names used in
+	 * column SQL</li>
+	 * </ul>
+	 * <p>
+	 * <b>Example Column SQL using filterMap:</b>
+	 * 
+	 * <pre>
+	 * "dataDefinition": {
+	 *   "type": "SQL",
+	 *   "config": {
+	 *     "sql": "SELECT vl.sample_collection_date FROM mamba_fact_viral_load_episode vl
+	 *             WHERE vl.patient_id = :patientId
+	 *               AND vl.native_order_id = :orderId
+	 *               AND vl.episode_id = :episodeId
+	 *             ORDER BY vl.sample_collection_date DESC LIMIT 1"
+	 *   }
+	 * }
+	 * </pre>
+	 * <p>
+	 * <b>Backward Compatibility:</b>
+	 * <ul>
+	 * <li>filterMap is optional - existing reports without it continue to work</li>
+	 * <li>When absent, column queries use only :patientId parameter</li>
+	 * <li>Reports without filterMap will use the original batched query behavior (same table
+	 * detection)</li>
+	 * </ul>
+	 * <p>
+	 * <b>Validation Rules:</b>
+	 * <ul>
+	 * <li>All filterMap keys must correspond to columns in the base cohort SELECT clause</li>
+	 * <li>filterMap values should reference valid column expressions (with or without table alias)</li>
+	 * <li>Column SQL should use parameter names that match filterMap keys (prefixed with :)</li>
+	 * </ul>
 	 */
 	@JsonIgnoreProperties(ignoreUnknown = true)
 	public static class BaseCohortDefinition {
@@ -231,6 +294,32 @@ public class LegacyGenericReportSchema {
 		
 		public void setConfig(Map<String, Object> config) {
 			this.config = config;
+		}
+		
+		/**
+		 * Extracts the filterMap from the config, if present.
+		 * 
+		 * @return Map of filter parameter names to column references, or empty map if not present
+		 */
+		@SuppressWarnings("unchecked")
+		public Map<String, String> getFilterMap() {
+			if (config == null || !config.containsKey("filterMap")) {
+				return new java.util.HashMap<String, String>();
+			}
+			Object filterMapObj = config.get("filterMap");
+			if (filterMapObj instanceof Map) {
+				return (Map<String, String>) filterMapObj;
+			}
+			return new java.util.HashMap<String, String>();
+		}
+		
+		/**
+		 * Checks if this base cohort definition has a filterMap configured.
+		 * 
+		 * @return true if filterMap is present and non-empty
+		 */
+		public boolean hasFilterMap() {
+			return !getFilterMap().isEmpty();
 		}
 	}
 	

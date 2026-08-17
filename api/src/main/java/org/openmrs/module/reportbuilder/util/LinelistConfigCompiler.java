@@ -141,6 +141,12 @@ public final class LinelistConfigCompiler {
 		String result = QUOTED_PARAM_SINGLE.matcher(sql).replaceAll(":$1");
 		result = QUOTED_PARAM_DOUBLE.matcher(result).replaceAll(":$1");
 		
+		// Strip trailing semicolons to prevent syntax errors
+		result = result.trim();
+		if (result.endsWith(";")) {
+			result = result.substring(0, result.length() - 1);
+		}
+		
 		return result;
 	}
 	
@@ -192,7 +198,8 @@ public final class LinelistConfigCompiler {
 	}
 	
 	/**
-	 * Rule: compile the (base) cohort SQL - keep its name, fix its bind parameters.
+	 * Rule: compile the (base) cohort SQL - keep its name, fix its bind parameters, and preserve
+	 * filterMap for data consistency.
 	 */
 	private static ObjectNode compileCohortDefinition(JsonNode cohort) {
 		ObjectNode out = MAPPER.createObjectNode();
@@ -200,6 +207,13 @@ public final class LinelistConfigCompiler {
 		out.put("name", cohort.path("name").asText(""));
 		ObjectNode config = MAPPER.createObjectNode();
 		config.put("sql", compileSqlParams(cohort.path("config").path("sql").asText("")));
+		
+		// Preserve filterMap for data consistency when column queries reference the same table
+		JsonNode filterMap = cohort.path("config").path("filterMap");
+		if (filterMap != null && filterMap.isObject() && filterMap.size() > 0) {
+			config.set("filterMap", filterMap.deepCopy());
+		}
+		
 		out.set("config", config);
 		return out;
 	}
