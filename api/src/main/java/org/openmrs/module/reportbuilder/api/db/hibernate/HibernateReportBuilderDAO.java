@@ -1052,4 +1052,121 @@ public class HibernateReportBuilderDAO implements ReportBuilderDAO {
 	private String like(String q) {
 		return "%" + q.trim().toLowerCase() + "%";
 	}
+	
+	// =========================================================
+	// ETLMonitor CRUD methods
+	// =========================================================
+	
+	@Override
+	public ETLMonitor saveETLMonitor(ETLMonitor monitor) {
+		getSession().saveOrUpdate(monitor);
+		return monitor;
+	}
+	
+	@Override
+	public ETLMonitor getETLMonitorById(Integer id) {
+		return (ETLMonitor) getSession().get(ETLMonitor.class, id);
+	}
+	
+	@Override
+	public ETLMonitor getETLMonitorByUuid(String uuid) {
+		Criteria c = getSession().createCriteria(ETLMonitor.class);
+		c.add(Restrictions.eq("uuid", uuid));
+		return (ETLMonitor) c.uniqueResult();
+	}
+	
+	@Override
+	public ETLMonitor getETLMonitorByCode(String code) {
+		if (code == null) {
+			return null;
+		}
+		Criteria c = getSession().createCriteria(ETLMonitor.class);
+		c.add(Restrictions.eq("code", code));
+		return (ETLMonitor) c.uniqueResult();
+	}
+	
+	@Override
+	public List<ETLMonitor> getETLMonitors(String qStr, boolean includeRetired, Integer startIndex, Integer limit) {
+		Criteria c = getSession().createCriteria(ETLMonitor.class);
+		c.setCacheMode(CacheMode.IGNORE);
+		
+		if (!includeRetired) {
+			c.add(Restrictions.eq("retired", false));
+		}
+		
+		if (qStr != null && !qStr.trim().isEmpty()) {
+			Disjunction or = Restrictions.disjunction();
+			String likeStr = like(qStr);
+			or.add(Restrictions.like("name", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("code", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("description", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("category", likeStr, MatchMode.ANYWHERE));
+			c.add(or);
+		}
+		
+		c.addOrder(Order.asc("sortOrder"));
+		c.addOrder(Order.desc("dateCreated"));
+		
+		if (startIndex != null && startIndex > 0) {
+			c.setFirstResult(startIndex);
+		}
+		if (limit != null && limit > 0) {
+			c.setMaxResults(limit);
+		}
+		
+		return c.list();
+	}
+	
+	@Override
+	public List<ETLMonitor> getETLMonitorsByCategory(String category, boolean includeRetired) {
+		Criteria c = getSession().createCriteria(ETLMonitor.class);
+		c.setCacheMode(CacheMode.IGNORE);
+		
+		if (!includeRetired) {
+			c.add(Restrictions.eq("retired", false));
+		}
+		
+		if (category != null && !category.trim().isEmpty()) {
+			c.add(Restrictions.eq("category", category));
+		}
+		
+		c.addOrder(Order.asc("sortOrder"));
+		return c.list();
+	}
+	
+	@Override
+	public List<ETLMonitor> getActiveETLMonitors() {
+		Criteria c = getSession().createCriteria(ETLMonitor.class);
+		c.add(Restrictions.eq("retired", false));
+		c.add(Restrictions.eq("active", true));
+		c.addOrder(Order.asc("sortOrder"));
+		return c.list();
+	}
+	
+	@Override
+	public long getETLMonitorsCount(String qStr, boolean includeRetired) {
+		Criteria c = getSession().createCriteria(ETLMonitor.class);
+		c.setProjection(Projections.rowCount());
+		
+		if (!includeRetired) {
+			c.add(Restrictions.eq("retired", false));
+		}
+		
+		if (qStr != null && !qStr.trim().isEmpty()) {
+			Disjunction or = Restrictions.disjunction();
+			String likeStr = like(qStr);
+			or.add(Restrictions.like("name", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("code", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("description", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("category", likeStr, MatchMode.ANYWHERE));
+			c.add(or);
+		}
+		
+		return ((Long) c.uniqueResult()).longValue();
+	}
+	
+	@Override
+	public void purgeETLMonitor(ETLMonitor monitor) {
+		getSession().delete(monitor);
+	}
 }

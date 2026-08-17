@@ -535,4 +535,109 @@ public interface ReportBuilderService extends OpenmrsService {
 	 */
 	int getLegacyReportCount();
 	
+	// =========================================================
+	// ETLMonitor
+	// =========================================================
+	
+	/**
+	 * Save or update an ETL Monitor
+	 * 
+	 * @param monitor the monitor to save
+	 * @return the saved monitor
+	 */
+	@Transactional
+	ETLMonitor saveETLMonitor(ETLMonitor monitor);
+	
+	/**
+	 * Get an ETL Monitor by ID
+	 * 
+	 * @param id the monitor ID
+	 * @return the monitor, or null if not found
+	 */
+	@Transactional(readOnly = true)
+	ETLMonitor getETLMonitorById(Integer id);
+	
+	/**
+	 * Get an ETL Monitor by UUID
+	 * 
+	 * @param uuid the monitor UUID
+	 * @return the monitor, or null if not found
+	 */
+	@Transactional(readOnly = true)
+	ETLMonitor getETLMonitorByUuid(String uuid);
+	
+	/**
+	 * Get an ETL Monitor by code
+	 * 
+	 * @param code the monitor code
+	 * @return the monitor, or null if not found
+	 */
+	@Transactional(readOnly = true)
+	ETLMonitor getETLMonitorByCode(String code);
+	
+	/**
+	 * Get ETL Monitors with optional search and pagination
+	 * 
+	 * @param q the search query (searches name, code, description, category)
+	 * @param includeRetired whether to include retired monitors
+	 * @param startIndex the start index for pagination
+	 * @param limit the maximum number of results
+	 * @return list of monitors
+	 */
+	@Transactional(readOnly = true)
+	List<ETLMonitor> getETLMonitors(String q, boolean includeRetired, Integer startIndex, Integer limit);
+	
+	/**
+	 * Get all active ETL Monitors
+	 * 
+	 * @return list of active monitors
+	 */
+	@Transactional(readOnly = true)
+	List<ETLMonitor> getActiveETLMonitors();
+	
+	/**
+	 * Get ETL Monitors by category
+	 * 
+	 * @param category the category to filter by
+	 * @param includeRetired whether to include retired monitors
+	 * @return list of monitors in the category
+	 */
+	@Transactional(readOnly = true)
+	List<ETLMonitor> getETLMonitorsByCategory(String category, boolean includeRetired);
+	
+	/**
+	 * Get count of ETL Monitors with optional search
+	 * 
+	 * @param q the search query
+	 * @param includeRetired whether to include retired monitors
+	 * @return the count of monitors
+	 */
+	@Transactional(readOnly = true)
+	long getETLMonitorsCount(String q, boolean includeRetired);
+	
+	/**
+	 * Retire an ETL Monitor
+	 * 
+	 * @param monitor the monitor to retire
+	 * @param reason the reason for retiring
+	 */
+	@Transactional
+	void retireETLMonitor(ETLMonitor monitor, String reason);
+	
+	/**
+	 * Unretire an ETL Monitor
+	 * 
+	 * @param monitor the monitor to unretire
+	 */
+	@Transactional
+	void unretireETLMonitor(ETLMonitor monitor);
+	
+	/**
+	 * Permanently delete an ETL Monitor
+	 * 
+	 * @param monitor the monitor to purge
+	 */
+	@Transactional
+	void purgeETLMonitor(ETLMonitor monitor);
+	
 }

@@ -260,12 +260,55 @@ public class ReportBuilderSectionPreviewResource extends DelegatingCrudResource<
 			return null;
 		}
 		
-		String out = s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
-		        .replace("&#39;", "'");
+		// Handle double-encoded entities by repeatedly decoding until no more changes
+		String out = s;
+		String prev;
+		int maxIterations = 5; // Prevent infinite loops
+		int iterations = 0;
 		
-		out = out.replace("&gt;=", ">=").replace("&lt;=", "<=");
-		out = out.replace("&gte;", ">=").replace("&ge;", ">=");
-		out = out.replace("&lte;", "<=").replace("&le;", "<=");
+		do {
+			prev = out;
+			
+			// IMPORTANT: Decode &amp; FIRST to handle double-encoded entities like &amp;lt; -> <
+			// This prevents &amp;gt; from becoming &gt; instead of >
+			out = out.replace("&amp;", "&");
+			
+			// Then decode other entities
+			out = out.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'")
+			        .replace("&#x27;", "'").replace("&#x60;", "`").replace("&#x3D;", "=").replace("&#x2F;", "/");
+			
+			iterations++;
+		} while (!out.equals(prev) && iterations < maxIterations);
+		
+		// Handle combined entities (>=, <=) - these should already be decoded above
+		// but just in case there are some variants:
+		out = out.replace("&gte;", ">=").replace("&ge;", ">=").replace("&lte;", "<=").replace("&le;", "<=");
+		
+		// Handle SQL-style double escaping in VALUES clauses
+		// Fix cases like (''F'') which should be ('F')
+		// The problem is SQL values like (''F''), (''M'') in VALUES clause
+		// We need to convert ''X'' to 'X' for any string X
+		// Using a loop to handle strings of any length
+		while (out.contains("''") && out.indexOf("''") != out.lastIndexOf("''")) {
+			// Find pattern like ''something'' and replace with 'something'
+			int first = out.indexOf("''");
+			int second = out.indexOf("''", first + 2);
+			if (second > first + 2) {
+				// Found ''something'' pattern
+				String content = out.substring(first + 2, second);
+				// Replace only if content doesn't contain another '' (avoid nested)
+				if (!content.contains("''")) {
+					String replacement = "'" + content + "'";
+					out = out.substring(0, first) + replacement + out.substring(second + 2);
+				} else {
+					// Content has nested '', skip this one
+					break;
+				}
+			} else {
+				// No valid pair found
+				break;
+			}
+		}
 		
 		return out;
 	}
