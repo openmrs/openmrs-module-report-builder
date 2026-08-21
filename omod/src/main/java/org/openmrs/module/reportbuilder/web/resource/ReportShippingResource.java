@@ -10,7 +10,7 @@
 package org.openmrs.module.reportbuilder.web.resource;
 
 import org.openmrs.api.context.Context;
-import org.openmrs.module.reportbuilder.api.ReportShippingService;
+import org.openmrs.module.reportbuilder.api.ReportBuilderService;
 import org.openmrs.module.reportbuilder.web.controller.dto.ShippingRequest;
 import org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult;
 import org.openmrs.module.webservices.rest.SimpleObject;
@@ -61,8 +61,8 @@ public class ReportShippingResource extends DelegatingCrudResource<ShippingResul
 		throw new UnsupportedOperationException("Shipping results cannot be purged");
 	}
 	
-	private ReportShippingService getShippingService() {
-		return Context.getService(ReportShippingService.class);
+	private ReportBuilderService getShippingService() {
+		return Context.getService(ReportBuilderService.class);
 	}
 	
 	/**
@@ -202,5 +202,115 @@ public class ReportShippingResource extends DelegatingCrudResource<ShippingResul
 	protected PageableResult doSearch(RequestContext context) throws ResponseException {
 		// Shipping results are not searchable
 		return new NeedsPaging<ShippingResult>(Collections.<ShippingResult> emptyList(), context);
+	}
+	
+	/**
+	 * POST handler for exporting all reports with dependencies. Expected request body: { "version":
+	 * "1.0.0", "destination": "/optional/path" }
+	 * 
+	 * @param bulkRequest The bulk export request
+	 * @param context The request context
+	 * @return SimpleObject with success status and aggregated export data
+	 */
+	public Object postAll(Object bulkRequest, RequestContext context) throws ResponseException {
+		try {
+			SimpleObject requestObj;
+			if (bulkRequest instanceof SimpleObject) {
+				requestObj = (SimpleObject) bulkRequest;
+			} else {
+				throw new IllegalArgumentException("Invalid request format");
+			}
+			
+			String version = (String) requestObj.get("version");
+			String destinationPath = (String) requestObj.get("destination");
+			
+			// Validate inputs
+			if (version == null || version.trim().isEmpty()) {
+				throw new IllegalArgumentException("version is required");
+			}
+			
+			// Determine destination directory
+			File destination;
+			if (destinationPath != null && !destinationPath.trim().isEmpty()) {
+				destination = new File(destinationPath);
+			} else {
+				destination = getShippingService().getDefaultShippingDirectory();
+			}
+			
+			// Execute bulk export
+			ShippingResult result = getShippingService().shipAllReports(version, destination);
+			
+			// Build response
+			SimpleObject response = new SimpleObject();
+			response.put("success", result.isSuccess());
+			response.put("message",
+			    result.isSuccess() ? "All reports exported successfully to " + destination.getAbsolutePath()
+			            : "Failed to export all reports: " + result.getErrorMessage());
+			response.put("data", resultToSimpleObject(result));
+			
+			return response;
+			
+		}
+		catch (Exception e) {
+			throw new IllegalArgumentException("Failed to export all reports: " + e.getMessage(), e);
+		}
+	}
+	
+	/**
+	 * POST handler for exporting all entities of specific types. Expected request body: {
+	 * "entityTypes": ["reports", "categories", "themes"], "version": "1.0.0", "destination":
+	 * "/optional/path" }
+	 * 
+	 * @param bulkRequest The bulk entity export request
+	 * @param context The request context
+	 * @return SimpleObject with success status and export results
+	 */
+	public Object postBulk(Object bulkRequest, RequestContext context) throws ResponseException {
+		try {
+			SimpleObject requestObj;
+			if (bulkRequest instanceof SimpleObject) {
+				requestObj = (SimpleObject) bulkRequest;
+			} else {
+				throw new IllegalArgumentException("Invalid request format");
+			}
+			
+			// Extract entity types
+			java.util.List<String> entityTypes = (java.util.List<String>) requestObj.get("entityTypes");
+			String version = (String) requestObj.get("version");
+			String destinationPath = (String) requestObj.get("destination");
+			
+			// Validate inputs
+			if (entityTypes == null || entityTypes.isEmpty()) {
+				throw new IllegalArgumentException("entityTypes is required");
+			}
+			if (version == null || version.trim().isEmpty()) {
+				throw new IllegalArgumentException("version is required");
+			}
+			
+			// Determine destination directory
+			File destination;
+			if (destinationPath != null && !destinationPath.trim().isEmpty()) {
+				destination = new File(destinationPath);
+			} else {
+				destination = getShippingService().getDefaultShippingDirectory();
+			}
+			
+			// Execute bulk export
+			ShippingResult result = getShippingService().shipAllEntities(entityTypes, version, destination);
+			
+			// Build response
+			SimpleObject response = new SimpleObject();
+			response.put("success", result.isSuccess());
+			response.put("message",
+			    result.isSuccess() ? "Bulk export completed successfully to " + destination.getAbsolutePath()
+			            : "Failed to complete bulk export: " + result.getErrorMessage());
+			response.put("data", resultToSimpleObject(result));
+			
+			return response;
+			
+		}
+		catch (Exception e) {
+			throw new IllegalArgumentException("Failed to complete bulk export: " + e.getMessage(), e);
+		}
 	}
 }

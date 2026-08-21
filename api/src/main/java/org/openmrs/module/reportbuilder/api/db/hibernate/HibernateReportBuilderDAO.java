@@ -203,6 +203,22 @@ public class HibernateReportBuilderDAO implements ReportBuilderDAO {
 		getSession().delete(indicator);
 	}
 	
+	public void retireReportBuilderIndicator(ReportBuilderIndicator indicator, String reason) {
+		indicator.setRetired(true);
+		indicator.setRetireReason(reason);
+		indicator.setDateRetired(new Date());
+		indicator.setRetiredBy(Context.getAuthenticatedUser());
+		getSession().saveOrUpdate(indicator);
+	}
+	
+	public void unretireReportBuilderIndicator(ReportBuilderIndicator indicator) {
+		indicator.setRetired(false);
+		indicator.setRetireReason(null);
+		indicator.setDateRetired(null);
+		indicator.setRetiredBy(null);
+		getSession().saveOrUpdate(indicator);
+	}
+	
 	// =========================================================
 	// ReportBuilderSection
 	// =========================================================
@@ -693,6 +709,14 @@ public class HibernateReportBuilderDAO implements ReportBuilderDAO {
 		getSession().saveOrUpdate(report);
 	}
 	
+	public void unretireReportBuilderReport(ReportBuilderReport report) {
+		report.setRetired(false);
+		report.setRetireReason(null);
+		report.setDateRetired(null);
+		report.setRetiredBy(null);
+		getSession().saveOrUpdate(report);
+	}
+	
 	public void purgeReportBuilderReport(ReportBuilderReport report) {
 		getSession().delete(report);
 	}
@@ -865,6 +889,22 @@ public class HibernateReportBuilderDAO implements ReportBuilderDAO {
 	
 	public void purgeReportLibrary(ReportLibrary reportLibrary) {
 		getSession().delete(reportLibrary);
+	}
+	
+	public void retireReportLibrary(ReportLibrary reportLibrary, String reason) {
+		reportLibrary.setRetired(true);
+		reportLibrary.setRetireReason(reason);
+		reportLibrary.setDateRetired(new Date());
+		reportLibrary.setRetiredBy(Context.getAuthenticatedUser());
+		getSession().saveOrUpdate(reportLibrary);
+	}
+	
+	public void unretireReportLibrary(ReportLibrary reportLibrary) {
+		reportLibrary.setRetired(false);
+		reportLibrary.setRetireReason(null);
+		reportLibrary.setDateRetired(null);
+		reportLibrary.setRetiredBy(null);
+		getSession().saveOrUpdate(reportLibrary);
 	}
 	
 	public ETLSource saveETLSource(ETLSource etlSource) {

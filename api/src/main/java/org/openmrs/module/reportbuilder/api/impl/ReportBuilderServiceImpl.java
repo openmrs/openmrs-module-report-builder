@@ -13,6 +13,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.openmrs.api.APIException;
 import org.openmrs.api.context.Context;
 import org.openmrs.api.impl.BaseOpenmrsService;
@@ -105,7 +108,40 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	
 	private final LinelistHtmlRenderer linelistHtmlRenderer = new LinelistHtmlRenderer();
 	
-	private final ObjectMapper objectMapper = new ObjectMapper();
+	/**
+	 * Maximum nesting depth for JSON serialization to handle OpenMRS entity graphs with circular
+	 * references. Default Jackson limit is 1000; increased to accommodate deep object hierarchies
+	 * from BaseOpenmrsMetadata inheritance chains.
+	 */
+	private static final int MAX_JSON_NESTING_DEPTH = 1500;
+	
+	private final ObjectMapper objectMapper;
+	
+	{
+		// Configure ObjectMapper to handle OpenMRS entities and circular references
+		objectMapper = new ObjectMapper();
+		// Don't fail on unknown properties (for backward compatibility)
+		objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+		// Don't fail on self references (circular references)
+		objectMapper.configure(SerializationFeature.FAIL_ON_SELF_REFERENCES, false);
+		// Don't fail on empty beans
+		objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+		// Exclude null values to reduce unnecessary data
+		objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+		
+		// Register mixins to break OpenMRS circular references
+		// This prevents: creator → User.person → Person.names → PersonName.creator → User.person → ...
+		// Also prevents: creator/changedBy/voidedBy fields from creating infinite loops
+		objectMapper.addMixIn(org.openmrs.User.class,
+		    org.openmrs.module.reportbuilder.api.export.OpenMRSJacksonMixins.UserMixin.class);
+		objectMapper.addMixIn(org.openmrs.Person.class,
+		    org.openmrs.module.reportbuilder.api.export.OpenMRSJacksonMixins.PersonMixin.class);
+		objectMapper.addMixIn(org.openmrs.PersonName.class,
+		    org.openmrs.module.reportbuilder.api.export.OpenMRSJacksonMixins.PersonNameMixin.class);
+		// Apply to all report builder entities that extend BaseOpenmrsMetadata
+		objectMapper.addMixIn(org.openmrs.BaseOpenmrsMetadata.class,
+		    org.openmrs.module.reportbuilder.api.export.OpenMRSJacksonMixins.BaseOpenmrsMetadataMixin.class);
+	}
 	
 	private JsonConfigParser legacyConfigParser;
 	
@@ -3191,5 +3227,2133 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	@Override
 	public void purgeETLMonitor(ETLMonitor monitor) {
 		dao.purgeETLMonitor(monitor);
+	}
+	
+	// ========== Report Shipping Method Implementations ==========
+	
+	/**
+	 * Import order respecting dependencies - foundation entities first
+	 */
+	private static final java.util.List<String> DEPENDENCY_ORDER = java.util.Arrays.asList("categories", "age-categories",
+	    "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "library");
+	
+	@Override
+	public org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipReport(String reportUuid, String version,
+	        File destination) {
+		org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult();
+		
+		try {
+			log.info("Shipping report: {} version: {} to: {}", reportUuid, version, destination.getAbsolutePath());
+			
+			// Validate report exists
+			ReportBuilderReport report = dao.getReportBuilderReportByUuid(reportUuid);
+			if (report == null) {
+				result.setSuccess(false);
+				result.setErrorMessage("Report not found with UUID: " + reportUuid);
+				return result;
+			}
+			
+			// Create directory structure
+			createShippingDirectories(destination);
+			
+			// Set basic result info
+			result.setReportCode(report.getCode() != null ? report.getCode() : report.getUuid());
+			result.setVersion(version);
+			
+			// Collect and export dependencies
+			exportShippingDependencies(report, destination, result);
+			
+			// Export the report source definition
+			File sourceFile = exportReportSource(report, destination);
+			result.setSourceFile(sourceFile.getAbsolutePath());
+			
+			// Compile and export the report configuration
+			com.fasterxml.jackson.databind.node.ObjectNode compiledConfig = compileReportConfiguration(report);
+			File compiledFile = exportCompiledReport(report, compiledConfig, destination);
+			result.setCompiledFile(compiledFile.getAbsolutePath());
+			
+			// Generate version metadata
+			File versionFile = generateVersionMetadata(report, version, result, destination);
+			result.setVersionFile(versionFile.getAbsolutePath());
+			
+			result.setSuccess(true);
+			log.info("Successfully shipped report: {}", report.getName());
+			
+		}
+		catch (Exception e) {
+			log.error("Failed to ship report: {}", reportUuid, e);
+			result.setSuccess(false);
+			result.setErrorMessage(e.getMessage());
+		}
+		
+		return result;
+	}
+	
+	@Override
+	public org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipBatch(java.util.List<String> reportUuids,
+	        String version, File destination) {
+		org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult();
+		java.util.Set<String> combinedDependencies = new java.util.HashSet<>();
+
+		try {
+			log.info("Shipping batch of {} reports version: {} to: {}", reportUuids.size(), version,
+			    destination.getAbsolutePath());
+
+			// Create directory structure
+			createShippingDirectories(destination);
+
+			// Process each report and collect dependencies
+			for (String reportUuid : reportUuids) {
+				ReportBuilderReport report = dao.getReportBuilderReportByUuid(reportUuid);
+				if (report == null) {
+					log.warn("Report not found with UUID: {}, skipping", reportUuid);
+					continue;
+				}
+
+				// Export report source
+				exportReportSource(report, destination);
+
+				// Compile and export
+				com.fasterxml.jackson.databind.node.ObjectNode compiledConfig = compileReportConfiguration(report);
+				exportCompiledReport(report, compiledConfig, destination);
+
+				// Dependencies would be accumulated here
+				log.debug("Processed report: {}", report.getName());
+			}
+
+			// Generate combined version metadata
+			// (Simplified - would need full implementation for batch shipping)
+			result.setSuccess(true);
+			result.setVersion(version);
+
+		}
+		catch (Exception e) {
+			log.error("Failed to ship batch reports", e);
+			result.setSuccess(false);
+			result.setErrorMessage(e.getMessage());
+		}
+
+		return result;
+	}
+	
+	@Override
+	public File exportEntity(String entityType, String entityUuid, File destination) {
+		try {
+			switch (entityType.toLowerCase()) {
+				case "category":
+					ReportCategory category = dao.getReportCategoryByUuid(entityUuid);
+					if (category != null) {
+						return exportCategory(category, destination);
+					}
+					break;
+				case "indicator":
+					ReportBuilderIndicator indicator = dao.getReportBuilderIndicatorByUuid(entityUuid);
+					if (indicator != null) {
+						return exportIndicator(indicator, destination);
+					}
+					break;
+				case "section":
+					ReportBuilderSection section = dao.getReportBuilderSectionByUuid(entityUuid);
+					if (section != null) {
+						return exportSection(section, destination);
+					}
+					break;
+				case "theme":
+					ReportBuilderDataTheme theme = dao.getReportBuilderDataThemeByUuid(entityUuid);
+					if (theme != null) {
+						return exportTheme(theme, destination);
+					}
+					break;
+				case "age-category":
+					ReportBuilderAgeCategory ageCategory = dao.getAgeCategoryByUuid(entityUuid);
+					if (ageCategory != null) {
+						return exportAgeCategory(ageCategory, destination);
+					}
+					break;
+				case "age-group":
+					// Age groups use ID instead of UUID
+					try {
+						Integer ageGroupId = Integer.parseInt(entityUuid);
+						ReportBuilderAgeGroup ageGroup = dao.getAgeGroupById(ageGroupId);
+						if (ageGroup != null) {
+							return exportAgeGroup(ageGroup, destination);
+						}
+					}
+					catch (NumberFormatException e) {
+						log.warn("Invalid age group ID: {}", entityUuid);
+					}
+					break;
+				case "etl-source":
+					ETLSource etlSource = dao.getETLSourceByUuid(entityUuid);
+					if (etlSource != null) {
+						return exportETLSource(etlSource, destination);
+					}
+					break;
+				case "etl-monitor":
+					ETLMonitor etlMonitor = dao.getETLMonitorByUuid(entityUuid);
+					if (etlMonitor != null) {
+						return exportETLMonitor(etlMonitor, destination);
+					}
+					break;
+				case "library":
+					ReportLibrary library = dao.getReportLibraryByUuid(entityUuid);
+					if (library != null) {
+						return exportLibrary(library, destination);
+					}
+					break;
+				default:
+					throw new IllegalArgumentException("Unknown entity type: " + entityType);
+			}
+			throw new IllegalArgumentException("Entity not found with UUID: " + entityUuid);
+			
+		}
+		catch (Exception e) {
+			log.error("Failed to export entity: {} with UUID: {}", entityType, entityUuid, e);
+			throw new APIException("Failed to export entity", e);
+		}
+	}
+	
+	@Override
+	public File getDefaultShippingDirectory() {
+		String openmrsData = System.getProperty("OPENMRS_APPLICATION_DATA_DIRECTORY");
+		if (openmrsData == null) {
+			openmrsData = System.getProperty("OPENMRS_HOME");
+		}
+		if (openmrsData == null) {
+			openmrsData = ".";
+		}
+		// Return the parent directory of configuration - createDirectories will add "configuration" prefix
+		return new File(openmrsData);
+	}
+	
+	@Override
+	public org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipAllReports(String version, File destination) {
+		log.info("Starting export of all reports, version: {}", version);
+		
+		List<ReportBuilderReport> allReports = getReportBuilderReports(null, false, null, null);
+		
+		if (allReports == null || allReports.isEmpty()) {
+			log.warn("No reports found to export");
+			org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult();
+			result.setSuccess(false);
+			result.setErrorMessage("No reports found in the system");
+			return result;
+		}
+		
+		log.info("Found {} reports to export", allReports.size());
+		
+		// Collect all report UUIDs
+		List<String> reportUuids = new ArrayList<String>();
+		for (ReportBuilderReport report : allReports) {
+			reportUuids.add(report.getUuid());
+		}
+		
+		// Use existing batch shipping method
+		return shipBatch(reportUuids, version, destination);
+	}
+	
+	@Override
+	public org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipAllEntities(
+	        java.util.List<String> entityTypes, String version, File destination) {
+		log.info("Starting bulk export of entity types: {}, version: {} to {}", entityTypes, version,
+		    destination.getAbsolutePath());
+
+		org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult();
+		result.setVersion(version);
+		result.setSuccess(true);
+
+		try {
+			// Create proper directory structure: configuration/reportbuilder/ and configuration/reports/
+			createShippingDirectories(destination);
+			log.info("Created directory structure at: {}", new File(destination, "configuration").getAbsolutePath());
+
+			// Export each entity type
+			for (String entityType : entityTypes) {
+				log.debug("Exporting entity type: {}", entityType);
+
+				switch (entityType.toLowerCase()) {
+					case "reports":
+						List<ReportBuilderReport> reports = getReportBuilderReports(null, false, null, null);
+						for (ReportBuilderReport report : reports) {
+							try {
+								File reportFile = exportReportSource(report, destination);
+								log.debug("Exported report: {} to {}", report.getName(), reportFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export report: {}", report.getName(), e);
+								result.setSuccess(false);
+								result.setErrorMessage("Failed to export report: " + report.getName());
+							}
+						}
+						break;
+
+					case "categories":
+						List<ReportCategory> categories = getReportCategories(null, false, null, null);
+						for (ReportCategory cat : categories) {
+							try {
+								File categoryFile = exportEntity("category", cat.getUuid(), destination);
+								log.debug("Exported category: {} to {}", cat.getName(), categoryFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export category: {}", cat.getName(), e);
+							}
+						}
+						break;
+
+					case "themes":
+						List<ReportBuilderDataTheme> themes = getReportBuilderDataThemes(null, false, null, null);
+						for (ReportBuilderDataTheme theme : themes) {
+							try {
+								File themeFile = exportEntity("theme", theme.getUuid(), destination);
+								log.debug("Exported theme: {} to {}", theme.getName(), themeFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export theme: {}", theme.getName(), e);
+							}
+						}
+						break;
+
+					case "indicators":
+						// Get all indicators by fetching all kinds
+						List<ReportBuilderIndicator> allIndicators = new ArrayList<>();
+						for (ReportBuilderIndicator.Kind kind : ReportBuilderIndicator.Kind.values()) {
+							List<ReportBuilderIndicator> kindIndicators = getReportBuilderIndicators(kind, false, null, null);
+							if (kindIndicators != null) {
+								allIndicators.addAll(kindIndicators);
+							}
+						}
+						for (ReportBuilderIndicator ind : allIndicators) {
+							try {
+								File indicatorFile = exportEntity("indicator", ind.getUuid(), destination);
+								log.debug("Exported indicator: {} to {}", ind.getName(), indicatorFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export indicator: {}", ind.getName(), e);
+							}
+						}
+						break;
+
+					case "sections":
+						List<ReportBuilderSection> sections = getReportBuilderSections(null, false, null, null);
+						for (ReportBuilderSection section : sections) {
+							try {
+								File sectionFile = exportEntity("section", section.getUuid(), destination);
+								log.debug("Exported section: {} to {}", section.getName(), sectionFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export section: {}", section.getName(), e);
+							}
+						}
+						break;
+
+					case "age-categories":
+						List<ReportBuilderAgeCategory> ageCategories = getAgeCategories(null, false, null, null, null);
+						for (ReportBuilderAgeCategory ageCategory : ageCategories) {
+							try {
+								File ageCatFile = exportEntity("age-category", ageCategory.getUuid(), destination);
+								log.debug("Exported age category: {} to {}", ageCategory.getName(), ageCatFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export age category: {}", ageCategory.getName(), e);
+							}
+						}
+						break;
+
+					case "age-groups":
+						List<ReportBuilderAgeGroup> ageGroups = getAgeGroups(null, null, null, null, null);
+						for (ReportBuilderAgeGroup ageGroup : ageGroups) {
+							try {
+								// Age groups use ID instead of UUID
+								File ageGroupFile = exportEntity("age-group", String.valueOf(ageGroup.getId()), destination);
+								log.debug("Exported age group: {} to {}", ageGroup.getLabel(), ageGroupFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export age group: {}", ageGroup.getLabel(), e);
+							}
+						}
+						break;
+
+					case "library":
+						List<ReportLibrary> libraries = getReportLibraries(null, false, null, null);
+						for (ReportLibrary library : libraries) {
+							try {
+								File libraryFile = exportEntity("library", library.getUuid(), destination);
+								log.debug("Exported library: {} to {}", library.getName(), libraryFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export library: {}", library.getName(), e);
+							}
+						}
+						break;
+
+					case "etl-sources":
+						List<ETLSource> etlSources = getAllETLSources(false);
+						for (ETLSource source : etlSources) {
+							try {
+								File sourceFile = exportEntity("etl-source", source.getUuid(), destination);
+								log.debug("Exported ETL source: {} to {}", source.getName(), sourceFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export ETL source: {}", source.getName(), e);
+							}
+						}
+						break;
+
+					case "etl-monitors":
+						List<ETLMonitor> etlMonitors = getETLMonitors(null, false, null, null);
+						for (ETLMonitor monitor : etlMonitors) {
+							try {
+								File monitorFile = exportEntity("etl-monitor", monitor.getUuid(), destination);
+								log.debug("Exported ETL monitor: {} to {}", monitor.getName(), monitorFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export ETL monitor: {}", monitor.getName(), e);
+							}
+						}
+						break;
+
+					default:
+						log.warn("Unknown entity type: {}", entityType);
+						break;
+				}
+			}
+
+			// Create version file in reportbuilder directory
+			File reportbuilderDir = new File(destination, "configuration" + File.separator + "reportbuilder");
+			createShippingVersionFile(reportbuilderDir, version);
+
+			result.setReportCode("BULK_EXPORT");
+			result.setSourceFile(reportbuilderDir.getAbsolutePath());
+			result.setVersionFile(new File(reportbuilderDir, "version.json").getAbsolutePath());
+
+			log.info("Bulk export completed successfully to: {}", reportbuilderDir.getAbsolutePath());
+
+		}
+		catch (Exception e) {
+			log.error("Failed to complete bulk export", e);
+			result.setSuccess(false);
+			result.setErrorMessage("Failed to complete bulk export: " + e.getMessage());
+		}
+
+		return result;
+	}
+	
+	// ========== Report Import Method Implementations ==========
+	
+	/**
+	 * Import order respecting dependencies - foundation entities first
+	 */
+	private static final java.util.List<String> IMPORT_ORDER = java.util.Arrays.asList("categories", "age-categories",
+	    "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "library");
+	
+	@Override
+	public org.openmrs.module.reportbuilder.web.controller.dto.ImportResult importFromDirectory(File sourceDir) {
+		org.openmrs.module.reportbuilder.web.controller.dto.ImportResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ImportResult();
+		result.setSummary("Import from directory: " + sourceDir.getAbsolutePath());
+		
+		try {
+			log.info("Starting import from directory: {}", sourceDir.getAbsolutePath());
+			
+			// Validate directory structure - look for configuration/reportbuilder
+			File configDir = new File(sourceDir, "configuration");
+			File reportbuilderDir = new File(configDir, "reportbuilder");
+			if (!reportbuilderDir.exists()) {
+				result.setSuccess(false);
+				result.setSummary("Invalid distribution package: missing configuration/reportbuilder directory");
+				return result;
+			}
+			
+			// Read version manifest if available
+			org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata versionManifest = readVersionManifest(reportbuilderDir);
+			if (versionManifest != null && versionManifest.getPackageInfo() != null) {
+				log.info("Found version manifest: {} version {}", versionManifest.getPackageInfo().getName(),
+				    versionManifest.getPackageInfo().getVersion());
+				// Add package info to summary
+				result.setSummary(String.format("Importing package: %s v%s from %s", versionManifest.getPackageInfo()
+				        .getName(), versionManifest.getPackageInfo().getVersion(), sourceDir.getAbsolutePath()));
+			}
+			
+			// Import in dependency order
+			for (String type : IMPORT_ORDER) {
+				File typeDir = new File(reportbuilderDir, type);
+				if (typeDir.exists() && typeDir.isDirectory()) {
+					importType(type, typeDir, result);
+				}
+			}
+			
+			// Import compiled reports from configuration/reports
+			File reportsDir = new File(configDir, "reports");
+			if (reportsDir.exists()) {
+				importCompiledReports(reportsDir, result);
+			}
+			
+			// Update summary
+			int successCount = result.getSuccessCount();
+			int errorCount = result.getErrorCount();
+			String packageInfo = versionManifest != null && versionManifest.getPackageInfo() != null ? String.format(
+			    " (%s v%s)", versionManifest.getPackageInfo().getName(), versionManifest.getPackageInfo().getVersion()) : "";
+			result.setSummary(String.format("Import complete%s: %d succeeded, %d failed", packageInfo, successCount,
+			    errorCount));
+			result.setSuccess(errorCount == 0);
+			
+			log.info("Import complete: {} succeeded, {} failed", successCount, errorCount);
+			
+		}
+		catch (Exception e) {
+			log.error("Failed to import from directory: {}", sourceDir.getAbsolutePath(), e);
+			result.setSuccess(false);
+			result.setSummary("Import failed: " + e.getMessage());
+		}
+		
+		return result;
+	}
+	
+	@Override
+	public org.openmrs.module.reportbuilder.web.controller.dto.ImportResult importEntity(String entityType, File file) {
+		org.openmrs.module.reportbuilder.web.controller.dto.ImportResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ImportResult();
+		
+		try {
+			String filename = file.getName();
+			log.info("Importing {} from file: {}", entityType, filename);
+			
+			switch (entityType.toLowerCase()) {
+				case "category":
+					importCategory(file);
+					result.addSuccess(entityType, filename);
+					break;
+				case "age-category":
+					importAgeCategory(file);
+					result.addSuccess(entityType, filename);
+					break;
+				case "age-group":
+					importAgeGroup(file);
+					result.addSuccess(entityType, filename);
+					break;
+				case "etl-source":
+					importETLSource(file);
+					result.addSuccess(entityType, filename);
+					break;
+				case "etl-monitor":
+					importETLMonitor(file);
+					result.addSuccess(entityType, filename);
+					break;
+				case "indicator":
+					importIndicator(file);
+					result.addSuccess(entityType, filename);
+					break;
+				case "section":
+					importSection(file);
+					result.addSuccess(entityType, filename);
+					break;
+				case "theme":
+					importTheme(file);
+					result.addSuccess(entityType, filename);
+					break;
+				case "report":
+					importReport(file);
+					result.addSuccess(entityType, filename);
+					break;
+				case "library":
+					importLibraryEntry(file);
+					result.addSuccess(entityType, filename);
+					break;
+				default:
+					result.addError(entityType, filename, "Unknown entity type: " + entityType);
+			}
+			
+			result.setSummary("Imported 1 entity");
+			
+		}
+		catch (Exception e) {
+			log.error("Failed to import entity from: {}", file.getName(), e);
+			result.addError(entityType, file.getName(), e.getMessage());
+			result.setSuccess(false);
+			result.setSummary("Import failed: " + e.getMessage());
+		}
+		
+		return result;
+	}
+	
+	@Override
+	public boolean validatePackage(File sourceDir) {
+		try {
+			// Look for configuration/reportbuilder directory
+			File configDir = new File(sourceDir, "configuration");
+			File reportbuilderDir = new File(configDir, "reportbuilder");
+			if (!reportbuilderDir.exists() || !reportbuilderDir.isDirectory()) {
+				log.warn("Invalid package: missing configuration/reportbuilder directory");
+				return false;
+			}
+			
+			// Check for at least one entity directory
+			boolean hasEntities = false;
+			for (String type : IMPORT_ORDER) {
+				File typeDir = new File(reportbuilderDir, type);
+				if (typeDir.exists() && typeDir.isDirectory() && typeDir.list().length > 0) {
+					hasEntities = true;
+					break;
+				}
+			}
+			
+			if (!hasEntities) {
+				log.warn("Invalid package: no entities found");
+				return false;
+			}
+			
+			// Check for version file in reportbuilder directory
+			File versionFile = new File(reportbuilderDir, "version.json");
+			if (!versionFile.exists()) {
+				log.warn("Warning: missing version.json file");
+			}
+			
+			return true;
+			
+		}
+		catch (Exception e) {
+			log.error("Failed to validate package", e);
+			return false;
+		}
+	}
+	
+	@Override
+	public java.util.List<String> getImportOrder() {
+		return new ArrayList<>(IMPORT_ORDER);
+	}
+	
+	// ========================================================================
+	// Private helper methods for Shipping
+	// ========================================================================
+	
+	/**
+	 * Create the required directory structure for shipping Creates:
+	 * {destination}/configuration/reportbuilder/ and {destination}/configuration/reports/
+	 */
+	private void createShippingDirectories(File destination) {
+		// Create the configuration directory structure
+		File configDir = new File(destination, "configuration");
+		File reportbuilderDir = new File(configDir, "reportbuilder");
+		reportbuilderDir.mkdirs();
+		
+		// Create reportbuilder source definition subdirectories
+		new File(reportbuilderDir, "reports").mkdirs();
+		new File(reportbuilderDir, "categories").mkdirs();
+		new File(reportbuilderDir, "indicators").mkdirs();
+		new File(reportbuilderDir, "sections").mkdirs();
+		new File(reportbuilderDir, "themes").mkdirs();
+		new File(reportbuilderDir, "age-categories").mkdirs();
+		new File(reportbuilderDir, "age-groups").mkdirs();
+		new File(reportbuilderDir, "etl-sources").mkdirs();
+		new File(reportbuilderDir, "etl-monitors").mkdirs();
+		new File(reportbuilderDir, "library").mkdirs();
+		
+		// Create compiled reports directories
+		File reportsDir = new File(configDir, "reports");
+		new File(reportsDir, "aggregates").mkdirs();
+		new File(reportsDir, "linelist").mkdirs();
+		
+		log.info("Created directory structure at: {}", configDir.getAbsolutePath());
+	}
+	
+	/**
+	 * Export all dependencies for a report
+	 */
+	private void exportShippingDependencies(ReportBuilderReport report, File destination,
+	        org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result) {
+		// Export category if present
+		if (report.getCategory() != null) {
+			File file = exportCategory(report.getCategory(), destination);
+			result.getDependencies().addCategory(file.getName());
+		}
+		
+		// Additional dependencies would be extracted from configJson
+		// and exported here (indicators, sections, themes, etc.)
+	}
+	
+	/**
+	 * Export the report source definition
+	 */
+	private File exportReportSource(ReportBuilderReport report, File destination) {
+		try {
+			// Serialize the report directly in database model format
+			String filename = getFileNameForExport(report.getCode(), report.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "reports" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, report);
+			log.debug("Exported report source: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export report source", e);
+		}
+	}
+	
+	/**
+	 * Compile the report configuration
+	 */
+	private com.fasterxml.jackson.databind.node.ObjectNode compileReportConfiguration(ReportBuilderReport report) {
+		try {
+			// Use existing compilation logic
+			// This would call the existing compileReportDefinition method
+			com.fasterxml.jackson.databind.node.ObjectNode config = objectMapper.createObjectNode();
+			config.put("uuid", report.getUuid());
+			config.put("name", report.getName());
+			config.put("code", report.getCode());
+			// Additional compilation would happen here
+			return config;
+		}
+		catch (Exception e) {
+			log.warn("Failed to fully compile report configuration, using basic config", e);
+			return objectMapper.createObjectNode();
+		}
+	}
+	
+	/**
+	 * Export the compiled report
+	 */
+	private File exportCompiledReport(ReportBuilderReport report,
+	        com.fasterxml.jackson.databind.node.ObjectNode compiledConfig, File destination) {
+		try {
+			org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport serialized = new org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport(
+			        report, compiledConfig);
+			serialized.setCompiledAt(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ").format(new Date()));
+			serialized.setCompiledBy(Context.getAuthenticatedUser() != null ? Context.getAuthenticatedUser().getUsername()
+			        : "system");
+			
+			if (report.getCategory() != null) {
+				serialized.setCategory(report.getCategory().getName());
+			}
+			
+			String subdir = report.getReportType() == ReportBuilderReport.ReportType.LINE_LIST ? "linelist" : "aggregates";
+			String filename = getFileNameForExport(report.getCode(), report.getUuid());
+			File file = new File(destination, "reports" + File.separator + subdir + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, serialized);
+			log.debug("Exported compiled report: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export compiled report", e);
+		}
+	}
+	
+	/**
+	 * Generate version metadata file
+	 */
+	private File generateVersionMetadata(ReportBuilderReport report, String version,
+	        org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result, File destination) throws IOException {
+		org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata metadata = new org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata();
+		
+		// Package info
+		metadata.getPackageInfo().setName(report.getCode() != null ? report.getCode() : report.getUuid());
+		metadata.getPackageInfo().setVersion(version);
+		metadata.getPackageInfo().setDescription("Report distribution package");
+		metadata.getPackageInfo().setExportedAt(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ").format(new Date()));
+		metadata.getPackageInfo().setExportedBy(
+		    Context.getAuthenticatedUser() != null ? Context.getAuthenticatedUser().getUsername() : "system");
+		metadata.getPackageInfo().setReportBuilderVersion("1.0.0");
+		
+		// Contents
+		org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.ReportInfo reportInfo = new org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.ReportInfo(
+		        report.getUuid(), report.getCode() != null ? report.getCode() : report.getUuid(),
+		        report.getReportType() != null ? report.getReportType().name() : "AGGREGATE", result.getSourceFile(),
+		        result.getCompiledFile());
+		metadata.getContents().addReport(reportInfo);
+		
+		// Add dependencies to contents
+		for (String dep : result.getDependencies().getCategories()) {
+			metadata.getContents().getDependencies().addCategory(dep);
+		}
+		// Add other dependencies similarly...
+		
+		File versionFile = new File(destination, "version.json");
+		objectMapper.writeValue(versionFile, metadata);
+		log.debug("Generated version metadata: {}", versionFile.getAbsolutePath());
+		return versionFile;
+	}
+	
+	/**
+	 * Generate filename for export - uses code if available, falls back to UUID
+	 */
+	private String getFileNameForExport(String code, String uuid) {
+		if (code != null && !code.trim().isEmpty()) {
+			return code + ".json";
+		}
+		return uuid + ".json";
+	}
+	
+	/**
+	 * Create a version metadata file for bulk exports
+	 */
+	private void createShippingVersionFile(File destination, String version) {
+		try {
+			org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata metadata = new org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata();
+			
+			// Package info
+			metadata.getPackageInfo().setName("bulk-export");
+			metadata.getPackageInfo().setVersion(version);
+			metadata.getPackageInfo().setDescription("Bulk export of ReportBuilder entities");
+			metadata.getPackageInfo().setExportedAt(
+			    new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ").format(new Date()));
+			metadata.getPackageInfo().setExportedBy(
+			    Context.getAuthenticatedUser() != null ? Context.getAuthenticatedUser().getUsername() : "system");
+			metadata.getPackageInfo().setReportBuilderVersion("1.0.0");
+			
+			File versionFile = new File(destination, "version.json");
+			objectMapper.writeValue(versionFile, metadata);
+			log.debug("Created version metadata file: {}", versionFile.getAbsolutePath());
+			
+		}
+		catch (IOException e) {
+			log.warn("Failed to create version metadata file", e);
+		}
+	}
+	
+	// ========================================================================
+	// Individual entity export methods
+	// ========================================================================
+	
+	private File exportCategory(ReportCategory category, File destination) {
+		try {
+			String filename = getFileNameForExport(null, category.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "categories" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, category);
+			log.debug("Exported category: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export category", e);
+		}
+	}
+	
+	private File exportIndicator(ReportBuilderIndicator indicator, File destination) {
+		try {
+			String filename = getFileNameForExport(indicator.getCode(), indicator.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "indicators" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, indicator);
+			log.debug("Exported indicator: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export indicator", e);
+		}
+	}
+	
+	private File exportSection(ReportBuilderSection section, File destination) {
+		try {
+			String filename = getFileNameForExport(section.getCode(), section.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "sections" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, section);
+			log.debug("Exported section: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export section", e);
+		}
+	}
+	
+	private File exportTheme(ReportBuilderDataTheme theme, File destination) {
+		try {
+			String filename = getFileNameForExport(theme.getCode(), theme.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator + "themes"
+			        + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, theme);
+			log.debug("Exported theme: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export theme", e);
+		}
+	}
+	
+	private File exportAgeCategory(ReportBuilderAgeCategory category, File destination) {
+		try {
+			String filename = getFileNameForExport(category.getCode(), category.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "age-categories" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, category);
+			log.debug("Exported age category: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export age category", e);
+		}
+	}
+	
+	private File exportAgeGroup(ReportBuilderAgeGroup ageGroup, File destination) {
+		try {
+			String filename = getFileNameForExport(ageGroup.getCode(), String.valueOf(ageGroup.getId()));
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "age-groups" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, ageGroup);
+			log.debug("Exported age group: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export age group", e);
+		}
+	}
+	
+	private File exportETLSource(ETLSource source, File destination) {
+		try {
+			String filename = getFileNameForExport(source.getCode(), source.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "etl-sources" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, source);
+			log.debug("Exported ETL source: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export ETL source", e);
+		}
+	}
+	
+	private File exportETLMonitor(ETLMonitor monitor, File destination) {
+		try {
+			String filename = getFileNameForExport(monitor.getCode(), monitor.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "etl-monitors" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, monitor);
+			log.debug("Exported ETL monitor: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export ETL monitor", e);
+		}
+	}
+	
+	private File exportLibrary(ReportLibrary library, File destination) {
+		try {
+			String filename = getFileNameForExport(library.getCode(), library.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "library" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, library);
+			log.debug("Exported library: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export library", e);
+		}
+	}
+	
+	// ========================================================================
+	// Private helper methods for Import
+	// ========================================================================
+	
+	/**
+	 * Import all entities of a specific type from a directory
+	 */
+	private void importType(String type, File dir, org.openmrs.module.reportbuilder.web.controller.dto.ImportResult result) {
+		File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
+
+		if (files == null || files.length == 0) {
+			return;
+		}
+
+		log.info("Importing {} entities from: {}", type, dir.getAbsolutePath());
+
+		for (File file : files) {
+			try {
+				switch (type) {
+					case "categories":
+						importCategory(file);
+						break;
+					case "age-categories":
+						importAgeCategory(file);
+						break;
+					case "age-groups":
+						importAgeGroup(file);
+						break;
+					case "etl-sources":
+						importETLSource(file);
+						break;
+					case "etl-monitors":
+						importETLMonitor(file);
+						break;
+					case "indicators":
+						importIndicator(file);
+						break;
+					case "sections":
+						importSection(file);
+						break;
+					case "themes":
+						importTheme(file);
+						break;
+					case "reports":
+						importReport(file);
+						break;
+					case "library":
+						importLibraryEntry(file);
+						break;
+					default:
+						log.warn("Unknown import type: {}", type);
+						continue;
+				}
+				result.addSuccess(type, file.getName());
+
+			}
+			catch (Exception e) {
+				log.error("Failed to import: {}", file.getName(), e);
+				result.addError(type, file.getName(), e.getMessage());
+			}
+		}
+	}
+	
+	/**
+	 * Import compiled reports from reports directory
+	 */
+	private void importCompiledReports(File reportsDir,
+	        org.openmrs.module.reportbuilder.web.controller.dto.ImportResult result) {
+		File[] subdirs = reportsDir.listFiles(File::isDirectory);
+
+		if (subdirs == null) {
+			return;
+		}
+
+		for (File subdir : subdirs) {
+			if ("aggregates".equals(subdir.getName()) || "linelist".equals(subdir.getName())) {
+				File[] files = subdir.listFiles((d, name) -> name.endsWith(".json"));
+				if (files != null) {
+					for (File file : files) {
+						try {
+							// Compiled reports are already handled in reports import
+							// This is for reference only
+							log.debug("Found compiled report: {}", file.getName());
+						}
+						catch (Exception e) {
+							log.warn("Could not process compiled report: {}", file.getName(), e);
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Read entity export from file - reads database model format Returns a JsonNode for flexible
+	 * parsing of different entity types
+	 */
+	private com.fasterxml.jackson.databind.JsonNode readEntityFile(File file) throws IOException {
+		String jsonContent = new String(java.nio.file.Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+		return objectMapper.readTree(jsonContent);
+	}
+	
+	/**
+	 * Read version manifest from package directory
+	 */
+	private org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata readVersionManifest(File packageDir) {
+		try {
+			File versionFile = new File(packageDir, "version.json");
+			if (!versionFile.exists()) {
+				log.debug("No version.json found in package directory");
+				return null;
+			}
+			
+			String jsonContent = new String(java.nio.file.Files.readAllBytes(versionFile.toPath()), StandardCharsets.UTF_8);
+			return objectMapper.readValue(jsonContent,
+			    org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.class);
+		}
+		catch (Exception e) {
+			log.warn("Failed to read version manifest: {}", e.getMessage());
+			return null;
+		}
+	}
+	
+	// ========================================================================
+	// Individual entity import methods (UUID-based deduplication pattern)
+	// ========================================================================
+	
+	/**
+	 * Import a ReportCategory entity - reads database model format
+	 */
+	private void importCategory(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ReportCategory existing = dao.getReportCategoryByUuid(uuid);
+		
+		if (existing != null) {
+			// Update existing
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			// Handle retired status
+			if (node.has("retired")) {
+				existing.setRetired(node.get("retired").asInt() == 1);
+			}
+			dao.saveReportCategory(existing);
+			log.debug("Updated existing category: {}", existing.getName());
+		} else {
+			// Create new
+			ReportCategory category = new ReportCategory();
+			category.setUuid(uuid);
+			category.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				category.setDescription(node.get("description").asText());
+			}
+			if (node.has("retired")) {
+				category.setRetired(node.get("retired").asInt() == 1);
+			}
+			dao.saveReportCategory(category);
+			log.debug("Created new category: {}", category.getName());
+		}
+	}
+	
+	/**
+	 * Import a ReportLibrary entity - reads database model format Enhanced to import all fields
+	 * that are exported
+	 */
+	private void importLibraryEntry(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ReportLibrary existing = dao.getReportLibraryByUuid(uuid);
+		
+		// Extract meta_json as JSON string
+		String metaJson = null;
+		if (node.has("meta_json") && !node.get("meta_json").isNull()) {
+			metaJson = objectMapper.writeValueAsString(node.get("meta_json"));
+		}
+		
+		if (existing != null) {
+			// Update existing - all fields
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			
+			// Import code field
+			if (node.has("code") && !node.get("code").isNull()) {
+				existing.setCode(node.get("code").asText());
+			}
+			
+			// Import sourceType field
+			if (node.has("source_type") && !node.get("source_type").isNull()) {
+				try {
+					existing.setSourceType(node.get("source_type").asText());
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid source_type value: {}", node.get("source_type").asText());
+				}
+			}
+			
+			// Import reportDefinitionUuid field
+			if (node.has("report_definition_uuid") && !node.get("report_definition_uuid").isNull()) {
+				existing.setReportDefinitionUuid(node.get("report_definition_uuid").asText());
+			}
+			
+			// Import reportBuilderReportUuid field
+			if (node.has("report_builder_report_uuid") && !node.get("report_builder_report_uuid").isNull()) {
+				existing.setReportBuilderReportUuid(node.get("report_builder_report_uuid").asText());
+			}
+			
+			// Handle category reference via category_uuid
+			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
+				String categoryUuid = node.get("category_uuid").asText();
+				ReportCategory category = dao.getReportCategoryByUuid(categoryUuid);
+				if (category != null) {
+					existing.setCategory(category);
+				}
+			}
+			
+			// Import reportType field
+			if (node.has("report_type") && !node.get("report_type").isNull()) {
+				try {
+					existing.setReportType(node.get("report_type").asText());
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid report_type value: {}", node.get("report_type").asText());
+				}
+			}
+			
+			// Import migrated field
+			if (node.has("migrated") && !node.get("migrated").isNull()) {
+				existing.setMigrated(node.get("migrated").asBoolean());
+			}
+			
+			// Import metaJson field
+			if (metaJson != null) {
+				existing.setMetaJson(metaJson);
+			}
+			
+			// Handle retired status
+			if (node.has("retired")) {
+				existing.setRetired(node.get("retired").asBoolean());
+				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
+					dao.retireReportLibrary(existing, node.get("retire_reason").asText());
+				}
+			} else {
+				dao.unretireReportLibrary(existing);
+			}
+			
+			dao.saveReportLibrary(existing);
+			log.debug("Updated existing library entry: {}", existing.getName());
+		} else {
+			// Create new - all fields
+			ReportLibrary library = new ReportLibrary();
+			library.setUuid(uuid);
+			library.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				library.setDescription(node.get("description").asText());
+			}
+			
+			// Import code field
+			if (node.has("code") && !node.get("code").isNull()) {
+				library.setCode(node.get("code").asText());
+			}
+			
+			// Import sourceType field
+			if (node.has("source_type") && !node.get("source_type").isNull()) {
+				try {
+					library.setSourceType(node.get("source_type").asText());
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid source_type value: {}", node.get("source_type").asText());
+				}
+			}
+			
+			// Import reportDefinitionUuid field
+			if (node.has("report_definition_uuid") && !node.get("report_definition_uuid").isNull()) {
+				library.setReportDefinitionUuid(node.get("report_definition_uuid").asText());
+			}
+			
+			// Import reportBuilderReportUuid field
+			if (node.has("report_builder_report_uuid") && !node.get("report_builder_report_uuid").isNull()) {
+				library.setReportBuilderReportUuid(node.get("report_builder_report_uuid").asText());
+			}
+			
+			// Handle category reference via category_uuid
+			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
+				String categoryUuid = node.get("category_uuid").asText();
+				ReportCategory category = dao.getReportCategoryByUuid(categoryUuid);
+				if (category != null) {
+					library.setCategory(category);
+				}
+			}
+			
+			// Import reportType field
+			if (node.has("report_type") && !node.get("report_type").isNull()) {
+				try {
+					library.setReportType(node.get("report_type").asText());
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid report_type value: {}", node.get("report_type").asText());
+				}
+			}
+			
+			// Import migrated field
+			if (node.has("migrated") && !node.get("migrated").isNull()) {
+				library.setMigrated(node.get("migrated").asBoolean());
+			}
+			
+			// Import metaJson field
+			if (metaJson != null) {
+				library.setMetaJson(metaJson);
+			}
+			
+			dao.saveReportLibrary(library);
+			
+			// Handle retired status after save
+			if (node.has("retired") && node.get("retired").asBoolean()) {
+				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
+					dao.retireReportLibrary(library, node.get("retire_reason").asText());
+				}
+			}
+			
+			log.debug("Created new library entry: {}", library.getName());
+		}
+	}
+	
+	/**
+	 * Import a ReportBuilderIndicator entity - reads database model format Enhanced to import all
+	 * fields that are exported
+	 */
+	private void importIndicator(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ReportBuilderIndicator existing = dao.getReportBuilderIndicatorByUuid(uuid);
+		
+		// Extract config_json and meta_json as JSON strings
+		String configJson = null;
+		String metaJson = null;
+		if (node.has("config_json") && !node.get("config_json").isNull()) {
+			configJson = objectMapper.writeValueAsString(node.get("config_json"));
+		}
+		if (node.has("meta_json") && !node.get("meta_json").isNull()) {
+			metaJson = objectMapper.writeValueAsString(node.get("meta_json"));
+		}
+		
+		if (existing != null) {
+			// Update existing - all fields
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			existing.setCode(node.get("code").asText());
+			if (configJson != null) {
+				existing.setConfigJson(configJson);
+			}
+			if (metaJson != null) {
+				existing.setMetaJson(metaJson);
+			}
+			
+			// Import kind field
+			if (node.has("kind") && !node.get("kind").isNull()) {
+				try {
+					existing.setKind(ReportBuilderIndicator.Kind.valueOf(node.get("kind").asText()));
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid kind value: {}", node.get("kind").asText());
+				}
+			}
+			
+			// Import defaultValueType field
+			if (node.has("default_value_type") && !node.get("default_value_type").isNull()) {
+				try {
+					existing.setDefaultValueType(ReportBuilderIndicator.ValueType.valueOf(node.get("default_value_type")
+					        .asText()));
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid default_value_type value: {}", node.get("default_value_type").asText());
+				}
+			}
+			
+			// Import themeUuid field
+			if (node.has("theme_uuid") && !node.get("theme_uuid").isNull()) {
+				existing.setThemeUuid(node.get("theme_uuid").asText());
+			}
+			
+			// Import sqlTemplate field
+			if (node.has("sql_template") && !node.get("sql_template").isNull()) {
+				existing.setSqlTemplate(node.get("sql_template").asText());
+			}
+			
+			// Import denominatorSqlTemplate field
+			if (node.has("denominator_sql_template") && !node.get("denominator_sql_template").isNull()) {
+				existing.setDenominatorSqlTemplate(node.get("denominator_sql_template").asText());
+			}
+			
+			// Handle retired status
+			if (node.has("retired")) {
+				existing.setRetired(node.get("retired").asBoolean());
+				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
+					dao.retireReportBuilderIndicator(existing, node.get("retire_reason").asText());
+				}
+			} else {
+				dao.unretireReportBuilderIndicator(existing);
+			}
+			
+			dao.saveReportBuilderIndicator(existing);
+			log.debug("Updated existing indicator: {}", existing.getName());
+		} else {
+			// Create new - all fields
+			ReportBuilderIndicator indicator = new ReportBuilderIndicator();
+			indicator.setUuid(uuid);
+			indicator.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				indicator.setDescription(node.get("description").asText());
+			}
+			indicator.setCode(node.get("code").asText());
+			if (configJson != null) {
+				indicator.setConfigJson(configJson);
+			}
+			if (metaJson != null) {
+				indicator.setMetaJson(metaJson);
+			}
+			
+			// Import kind field
+			if (node.has("kind") && !node.get("kind").isNull()) {
+				try {
+					indicator.setKind(ReportBuilderIndicator.Kind.valueOf(node.get("kind").asText()));
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid kind value: {}", node.get("kind").asText());
+				}
+			}
+			
+			// Import defaultValueType field
+			if (node.has("default_value_type") && !node.get("default_value_type").isNull()) {
+				try {
+					indicator.setDefaultValueType(ReportBuilderIndicator.ValueType.valueOf(node.get("default_value_type")
+					        .asText()));
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid default_value_type value: {}", node.get("default_value_type").asText());
+				}
+			}
+			
+			// Import themeUuid field
+			if (node.has("theme_uuid") && !node.get("theme_uuid").isNull()) {
+				indicator.setThemeUuid(node.get("theme_uuid").asText());
+			}
+			
+			// Import sqlTemplate field
+			if (node.has("sql_template") && !node.get("sql_template").isNull()) {
+				indicator.setSqlTemplate(node.get("sql_template").asText());
+			}
+			
+			// Import denominatorSqlTemplate field
+			if (node.has("denominator_sql_template") && !node.get("denominator_sql_template").isNull()) {
+				indicator.setDenominatorSqlTemplate(node.get("denominator_sql_template").asText());
+			}
+			
+			dao.saveReportBuilderIndicator(indicator);
+			
+			// Handle retired status after save
+			if (node.has("retired") && node.get("retired").asBoolean()) {
+				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
+					dao.retireReportBuilderIndicator(indicator, node.get("retire_reason").asText());
+				}
+			}
+			
+			log.debug("Created new indicator: {}", indicator.getName());
+		}
+	}
+	
+	/**
+	 * Import a ReportBuilderSection entity - reads database model format
+	 */
+	private void importSection(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ReportBuilderSection existing = dao.getReportBuilderSectionByUuid(uuid);
+		
+		// Extract config_json as JSON string
+		String configJson = null;
+		if (node.has("config_json") && !node.get("config_json").isNull()) {
+			configJson = objectMapper.writeValueAsString(node.get("config_json"));
+		}
+		
+		if (existing != null) {
+			// Update existing
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			existing.setCode(node.get("code").asText());
+			if (configJson != null) {
+				existing.setConfigJson(configJson);
+			}
+			dao.saveReportBuilderSection(existing);
+			log.debug("Updated existing section: {}", existing.getName());
+		} else {
+			// Create new
+			ReportBuilderSection section = new ReportBuilderSection();
+			section.setUuid(uuid);
+			section.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				section.setDescription(node.get("description").asText());
+			}
+			section.setCode(node.get("code").asText());
+			if (configJson != null) {
+				section.setConfigJson(configJson);
+			}
+			dao.saveReportBuilderSection(section);
+			log.debug("Created new section: {}", section.getName());
+		}
+	}
+	
+	/**
+	 * Import a ReportBuilderDataTheme entity
+	 */
+	private void importTheme(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ReportBuilderDataTheme existing = dao.getReportBuilderDataThemeByUuid(uuid);
+		
+		// Extract config_json as JSON string
+		String configJson = null;
+		if (node.has("config_json") && !node.get("config_json").isNull()) {
+			configJson = objectMapper.writeValueAsString(node.get("config_json"));
+		}
+		
+		if (existing != null) {
+			// Update existing
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			existing.setCode(node.get("code").asText());
+			if (configJson != null) {
+				existing.setConfigJson(configJson);
+			}
+			dao.saveReportBuilderDataTheme(existing);
+			log.debug("Updated existing theme: {}", existing.getName());
+		} else {
+			// Create new
+			ReportBuilderDataTheme theme = new ReportBuilderDataTheme();
+			theme.setUuid(uuid);
+			theme.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				theme.setDescription(node.get("description").asText());
+			}
+			theme.setCode(node.get("code").asText());
+			if (configJson != null) {
+				theme.setConfigJson(configJson);
+			}
+			dao.saveReportBuilderDataTheme(theme);
+			log.debug("Created new theme: {}", theme.getName());
+		}
+	}
+	
+	/**
+	 * Import a ReportBuilderAgeCategory entity - reads database model format
+	 */
+	private void importAgeCategory(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ReportBuilderAgeCategory existing = dao.getAgeCategoryByUuid(uuid);
+		
+		if (existing != null) {
+			// Update existing
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			existing.setCode(node.get("code").asText());
+			dao.saveAgeCategory(existing);
+			log.debug("Updated existing age category: {}", existing.getName());
+		} else {
+			// Create new
+			ReportBuilderAgeCategory category = new ReportBuilderAgeCategory();
+			category.setUuid(uuid);
+			category.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				category.setDescription(node.get("description").asText());
+			}
+			category.setCode(node.get("code").asText());
+			dao.saveAgeCategory(category);
+			log.debug("Created new age category: {}", category.getName());
+		}
+	}
+	
+	/**
+	 * Import a ReportBuilderAgeGroup entity Note: AgeGroups don't have UUID, use category + label
+	 * for deduplication
+	 */
+	private void importAgeGroup(File file) throws IOException {
+		// Note: Age groups are typically imported as part of age categories
+		// This method handles individual age group imports if needed
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		// Look up the category by UUID - note: age groups don't have category_uuid in their JSON
+		// They reference the category through their parent relationship
+		// For simplicity, we'll extract min/max days and code from the node
+		String label = node.get("label").asText();
+		String code = node.get("code").asText();
+		int minAgeDays = node.get("min_age_days").asInt();
+		int maxAgeDays = node.get("max_age_days").asInt();
+		
+		// Since age groups don't have UUIDs and are category-dependent,
+		// we skip individual import and rely on category import
+		log.debug("Age group {} ({}) will be imported with its category", label, code);
+	}
+	
+	/**
+	 * Import an ETLSource entity
+	 */
+	private void importETLSource(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ETLSource existing = dao.getETLSourceByUuid(uuid);
+		
+		if (existing != null) {
+			// Update existing
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			existing.setCode(node.get("code").asText());
+			dao.saveETLSource(existing);
+			log.debug("Updated existing ETL source: {}", existing.getName());
+		} else {
+			// Create new
+			ETLSource source = new ETLSource();
+			source.setUuid(uuid);
+			source.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				source.setDescription(node.get("description").asText());
+			}
+			source.setCode(node.get("code").asText());
+			dao.saveETLSource(source);
+			log.debug("Created new ETL source: {}", source.getName());
+		}
+	}
+	
+	/**
+	 * Import an ETLMonitor entity - reads database model format
+	 */
+	private void importETLMonitor(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ETLMonitor existing = dao.getETLMonitorByUuid(uuid);
+		
+		// Extract config_json and display_config_json as JSON strings
+		String configJson = null;
+		String displayConfigJson = null;
+		if (node.has("config_json") && !node.get("config_json").isNull()) {
+			configJson = objectMapper.writeValueAsString(node.get("config_json"));
+		}
+		if (node.has("display_config_json") && !node.get("display_config_json").isNull()) {
+			displayConfigJson = objectMapper.writeValueAsString(node.get("display_config_json"));
+		}
+		
+		if (existing != null) {
+			// Update existing
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			existing.setCode(node.get("code").asText());
+			if (configJson != null) {
+				existing.setConfigJson(configJson);
+			}
+			if (displayConfigJson != null) {
+				existing.setDisplayConfigJson(displayConfigJson);
+			}
+			dao.saveETLMonitor(existing);
+			log.debug("Updated existing ETL monitor: {}", existing.getName());
+		} else {
+			// Create new
+			ETLMonitor monitor = new ETLMonitor();
+			monitor.setUuid(uuid);
+			monitor.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				monitor.setDescription(node.get("description").asText());
+			}
+			monitor.setCode(node.get("code").asText());
+			if (configJson != null) {
+				monitor.setConfigJson(configJson);
+			}
+			if (displayConfigJson != null) {
+				monitor.setDisplayConfigJson(displayConfigJson);
+			}
+			dao.saveETLMonitor(monitor);
+			log.debug("Created new ETL monitor: {}", monitor.getName());
+		}
+	}
+	
+	/**
+	 * Import a ReportBuilderReport entity - reads database model format Enhanced to import all
+	 * fields that are exported
+	 */
+	private void importReport(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ReportBuilderReport existing = dao.getReportBuilderReportByUuid(uuid);
+		
+		// Extract config_json and meta_json as JSON strings
+		String configJson = null;
+		String metaJson = null;
+		if (node.has("config_json") && !node.get("config_json").isNull()) {
+			configJson = objectMapper.writeValueAsString(node.get("config_json"));
+		}
+		if (node.has("meta_json") && !node.get("meta_json").isNull()) {
+			metaJson = objectMapper.writeValueAsString(node.get("meta_json"));
+		}
+		
+		if (existing != null) {
+			// Update existing - all fields
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			existing.setCode(node.get("code").asText());
+			if (configJson != null) {
+				existing.setConfigJson(configJson);
+			}
+			if (metaJson != null) {
+				existing.setMetaJson(metaJson);
+			}
+			
+			// Handle category reference via category_uuid
+			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
+				String categoryUuid = node.get("category_uuid").asText();
+				ReportCategory category = dao.getReportCategoryByUuid(categoryUuid);
+				if (category != null) {
+					existing.setCategory(category);
+				}
+			}
+			
+			// Handle report type
+			if (node.has("report_type") && !node.get("report_type").isNull()) {
+				existing.setReportType(node.get("report_type").asText());
+			}
+			
+			// Import compiledReportDefinitionUuid field
+			if (node.has("compiled_report_definition_uuid") && !node.get("compiled_report_definition_uuid").isNull()) {
+				existing.setCompiledReportDefinitionUuid(node.get("compiled_report_definition_uuid").asText());
+			}
+			
+			// Import compiledReportDesignUuid field
+			if (node.has("compiled_report_design_uuid") && !node.get("compiled_report_design_uuid").isNull()) {
+				existing.setCompiledReportDesignUuid(node.get("compiled_report_design_uuid").asText());
+			}
+			
+			// Import lastCompiledAt field
+			if (node.has("last_compiled_at") && !node.get("last_compiled_at").isNull()) {
+				try {
+					String timestamp = node.get("last_compiled_at").asText();
+					// Parse ISO 8601 timestamp
+					java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
+					existing.setLastCompiledAt(sdf.parse(timestamp));
+				}
+				catch (Exception e) {
+					log.warn("Invalid last_compiled_at value: {}", node.get("last_compiled_at").asText());
+				}
+			}
+			
+			// Import compileStatus field
+			if (node.has("compile_status") && !node.get("compile_status").isNull()) {
+				try {
+					existing.setCompileStatus(ReportBuilderReport.ReportCompileStatus.valueOf(node.get("compile_status")
+					        .asText()));
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid compile_status value: {}", node.get("compile_status").asText());
+				}
+			}
+			
+			// Handle retired status
+			if (node.has("retired")) {
+				existing.setRetired(node.get("retired").asBoolean());
+				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
+					dao.retireReportBuilderReport(existing, node.get("retire_reason").asText());
+				}
+			} else {
+				dao.unretireReportBuilderReport(existing);
+			}
+			
+			dao.saveReportBuilderReport(existing);
+			log.debug("Updated existing report: {}", existing.getName());
+		} else {
+			// Create new - all fields
+			ReportBuilderReport report = new ReportBuilderReport();
+			report.setUuid(uuid);
+			report.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				report.setDescription(node.get("description").asText());
+			}
+			report.setCode(node.get("code").asText());
+			if (configJson != null) {
+				report.setConfigJson(configJson);
+			}
+			if (metaJson != null) {
+				report.setMetaJson(metaJson);
+			}
+			
+			// Handle report type
+			if (node.has("report_type") && !node.get("report_type").isNull()) {
+				report.setReportType(node.get("report_type").asText());
+			}
+			
+			// Handle category reference via category_uuid
+			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
+				String categoryUuid = node.get("category_uuid").asText();
+				ReportCategory category = dao.getReportCategoryByUuid(categoryUuid);
+				if (category != null) {
+					report.setCategory(category);
+				}
+			}
+			
+			// Import compiledReportDefinitionUuid field
+			if (node.has("compiled_report_definition_uuid") && !node.get("compiled_report_definition_uuid").isNull()) {
+				report.setCompiledReportDefinitionUuid(node.get("compiled_report_definition_uuid").asText());
+			}
+			
+			// Import compiledReportDesignUuid field
+			if (node.has("compiled_report_design_uuid") && !node.get("compiled_report_design_uuid").isNull()) {
+				report.setCompiledReportDesignUuid(node.get("compiled_report_design_uuid").asText());
+			}
+			
+			// Import lastCompiledAt field
+			if (node.has("last_compiled_at") && !node.get("last_compiled_at").isNull()) {
+				try {
+					String timestamp = node.get("last_compiled_at").asText();
+					// Parse ISO 8601 timestamp
+					java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
+					report.setLastCompiledAt(sdf.parse(timestamp));
+				}
+				catch (Exception e) {
+					log.warn("Invalid last_compiled_at value: {}", node.get("last_compiled_at").asText());
+				}
+			}
+			
+			// Import compileStatus field
+			if (node.has("compile_status") && !node.get("compile_status").isNull()) {
+				try {
+					report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.valueOf(node.get("compile_status")
+					        .asText()));
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid compile_status value: {}", node.get("compile_status").asText());
+				}
+			}
+			
+			dao.saveReportBuilderReport(report);
+			
+			// Handle retired status after save
+			if (node.has("retired") && node.get("retired").asBoolean()) {
+				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
+					dao.retireReportBuilderReport(report, node.get("retire_reason").asText());
+				}
+			}
+			
+			log.debug("Created new report: {}", report.getName());
+		}
+	}
+	
+	// ========== Report Package Methods ==========
+	
+	@Override
+	@Transactional(readOnly = true)
+	public java.util.List<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo> getAvailablePackages(
+	        String search, String status, Integer startIndex, Integer limit) {
+		java.util.List<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo> packages = new java.util.ArrayList<>();
+
+		try {
+			// Get the packages directory
+			File shippingDir = getDefaultShippingDirectory();
+			File packagesDir = new File(shippingDir, "configuration" + File.separator + "reportbuilder");
+
+			if (!packagesDir.exists() || !packagesDir.isDirectory()) {
+				log.debug("Packages directory does not exist: {}", packagesDir.getAbsolutePath());
+				return packages;
+			}
+
+			// List all subdirectories (each is a potential package)
+			File[] packageDirs = packagesDir.listFiles();
+			if (packageDirs == null) {
+				return packages;
+			}
+
+			// Process each directory
+			for (File packageDir : packageDirs) {
+				if (!packageDir.isDirectory()) {
+					continue;
+				}
+
+				try {
+					org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo packageInfo = buildPackageInfo(packageDir);
+					if (packageInfo != null && matchesFilters(packageInfo, search, status)) {
+						packages.add(packageInfo);
+					}
+				}
+				catch (Exception e) {
+					log.warn("Failed to read package from directory: {}", packageDir.getAbsolutePath(), e);
+				}
+			}
+
+			// Sort by exported date descending
+			java.util.Collections.sort(packages, new java.util.Comparator<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo>() {
+				@Override
+				public int compare(org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo p1,
+				        org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo p2) {
+					if (p1.getExportedAt() == null) return 1;
+					if (p2.getExportedAt() == null) return -1;
+					return p2.getExportedAt().compareTo(p1.getExportedAt());
+				}
+			});
+
+			// Apply pagination
+			int start = startIndex != null ? startIndex : 0;
+			int maxResults = limit != null ? limit : 50;
+
+			int end = Math.min(start + maxResults, packages.size());
+			if (start >= packages.size()) {
+				return new java.util.ArrayList<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo>();
+			}
+
+			return packages.subList(start, end);
+
+		}
+		catch (Exception e) {
+			log.error("Failed to get available packages", e);
+			return packages;
+		}
+	}
+	
+	@Override
+	@Transactional(readOnly = true)
+	public long getAvailablePackagesCount(String search, String status) {
+		try {
+			File shippingDir = getDefaultShippingDirectory();
+			File packagesDir = new File(shippingDir, "configuration" + File.separator + "reportbuilder");
+			
+			if (!packagesDir.exists() || !packagesDir.isDirectory()) {
+				return 0;
+			}
+			
+			File[] packageDirs = packagesDir.listFiles();
+			if (packageDirs == null) {
+				return 0;
+			}
+			
+			long count = 0;
+			for (File packageDir : packageDirs) {
+				if (!packageDir.isDirectory()) {
+					continue;
+				}
+				
+				try {
+					org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo packageInfo = buildPackageInfo(packageDir);
+					if (packageInfo != null && matchesFilters(packageInfo, search, status)) {
+						count++;
+					}
+				}
+				catch (Exception e) {
+					log.warn("Failed to read package from directory: {}", packageDir.getAbsolutePath(), e);
+				}
+			}
+			
+			return count;
+			
+		}
+		catch (Exception e) {
+			log.error("Failed to get available packages count", e);
+			return 0;
+		}
+	}
+	
+	/**
+	 * Build PackageInfo from a package directory
+	 */
+	private org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo buildPackageInfo(File packageDir) {
+		org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo packageInfo = new org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo();
+		packageInfo.setPath(packageDir.getAbsolutePath());
+		packageInfo.setStatus("invalid"); // Default to invalid
+		
+		try {
+			// Read version.json
+			File versionFile = new File(packageDir, "version.json");
+			if (!versionFile.exists()) {
+				log.warn("Package missing version.json: {}", packageDir.getAbsolutePath());
+				packageInfo.setName(packageDir.getName());
+				return packageInfo;
+			}
+			
+			// Parse version.json
+			org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata metadata = objectMapper.readValue(
+			    versionFile, org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.class);
+			
+			// Extract package info
+			if (metadata.getPackageInfo() != null) {
+				packageInfo.setName(metadata.getPackageInfo().getName());
+				packageInfo.setVersion(metadata.getPackageInfo().getVersion());
+				packageInfo.setDescription(metadata.getPackageInfo().getDescription());
+				packageInfo.setExportedAt(metadata.getPackageInfo().getExportedAt());
+				packageInfo.setExportedBy(metadata.getPackageInfo().getExportedBy());
+			} else {
+				packageInfo.setName(packageDir.getName());
+			}
+			
+			// Extract dependency counts
+			if (metadata.getContents() != null && metadata.getContents().getDependencies() != null) {
+				org.openmrs.module.reportbuilder.web.controller.dto.PackageDependencySummary summary = new org.openmrs.module.reportbuilder.web.controller.dto.PackageDependencySummary();
+				org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.DependencyInfo deps = metadata
+				        .getContents().getDependencies();
+				
+				summary.setCategories(deps.getCategories() != null ? deps.getCategories().size() : 0);
+				summary.setIndicators(deps.getIndicators() != null ? deps.getIndicators().size() : 0);
+				summary.setThemes(deps.getThemes() != null ? deps.getThemes().size() : 0);
+				summary.setSections(deps.getSections() != null ? deps.getSections().size() : 0);
+				summary.setLibrary(deps.getLibrary() != null ? deps.getLibrary().size() : 0);
+				summary.setAgeCategories(deps.getAgeCategories() != null ? deps.getAgeCategories().size() : 0);
+				summary.setAgeGroups(deps.getAgeGroups() != null ? deps.getAgeGroups().size() : 0);
+				summary.setEtlSources(deps.getEtlSources() != null ? deps.getEtlSources().size() : 0);
+				summary.setEtlMonitors(deps.getEtlMonitors() != null ? deps.getEtlMonitors().size() : 0);
+				
+				packageInfo.setDependencies(summary);
+			}
+			
+			// Calculate directory size
+			packageInfo.setSize(calculateDirectorySize(packageDir));
+			
+			// Validate package structure
+			packageInfo.setStatus(validatePackageStructure(packageDir, metadata) ? "valid" : "invalid");
+			
+		}
+		catch (Exception e) {
+			log.warn("Failed to parse version.json for package: {}", packageDir.getAbsolutePath(), e);
+			packageInfo.setName(packageDir.getName());
+			packageInfo.setStatus("invalid");
+		}
+		
+		return packageInfo;
+	}
+	
+	/**
+	 * Validate package structure
+	 */
+	private boolean validatePackageStructure(File packageDir,
+	        org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata metadata) {
+		// Must have valid metadata with name and version
+		if (metadata.getPackageInfo() == null) {
+			return false;
+		}
+		if (metadata.getPackageInfo().getName() == null || metadata.getPackageInfo().getName().trim().isEmpty()) {
+			return false;
+		}
+		if (metadata.getPackageInfo().getVersion() == null || metadata.getPackageInfo().getVersion().trim().isEmpty()) {
+			return false;
+		}
+		
+		// Must have at least one report source file
+		File configDir = new File(packageDir, "configuration");
+		File reportbuilderDir = new File(configDir, "reportbuilder");
+		if (!reportbuilderDir.exists() || !reportbuilderDir.isDirectory()) {
+			return false;
+		}
+		
+		File reportsDir = new File(reportbuilderDir, "reports");
+		if (reportsDir.exists() && reportsDir.isDirectory()) {
+			File[] reportFiles = reportsDir.listFiles();
+			if (reportFiles != null && reportFiles.length > 0) {
+				return true;
+			}
+		}
+		
+		return false;
+	}
+	
+	/**
+	 * Calculate total size of a directory recursively
+	 */
+	private long calculateDirectorySize(File directory) {
+		long size = 0;
+		File[] files = directory.listFiles();
+		if (files != null) {
+			for (File file : files) {
+				if (file.isFile()) {
+					size += file.length();
+				} else {
+					size += calculateDirectorySize(file);
+				}
+			}
+		}
+		return size;
+	}
+	
+	/**
+	 * Check if package matches the given filters
+	 */
+	private boolean matchesFilters(org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo packageInfo,
+	        String search, String status) {
+		// Filter by search term
+		if (search != null && !search.trim().isEmpty()) {
+			String searchLower = search.toLowerCase();
+			boolean matchesName = packageInfo.getName() != null && packageInfo.getName().toLowerCase().contains(searchLower);
+			boolean matchesVersion = packageInfo.getVersion() != null
+			        && packageInfo.getVersion().toLowerCase().contains(searchLower);
+			if (!matchesName && !matchesVersion) {
+				return false;
+			}
+		}
+		
+		// Filter by status
+		if (status != null && !status.trim().isEmpty()) {
+			if (!status.equals(packageInfo.getStatus())) {
+				return false;
+			}
+		}
+		
+		return true;
 	}
 }

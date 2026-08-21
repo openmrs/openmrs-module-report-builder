@@ -27,41 +27,12 @@
         <property name="transactionAttributeSource" ref="transactionAttributeSource" />
     </bean>
 
-    <!-- Report Shipping Service - for exporting/shipping reports -->
-    <bean id="reportbuilder.ReportShippingService"
-          class="org.springframework.transaction.interceptor.TransactionProxyFactoryBean">
-        <property name="transactionManager" ref="transactionManager" />
-        <property name="target">
-            <bean class="org.openmrs.module.reportbuilder.api.impl.ReportShippingServiceImpl">
-                <property name="dao" ref="reportbuilder.HibernateReportBuilderDAO" />
-            </bean>
-        </property>
-        <property name="preInterceptors" ref="serviceInterceptors" />
-        <property name="transactionAttributeSource" ref="transactionAttributeSource" />
-    </bean>
-
-    <!-- Report Import Service - for importing reports -->
-    <bean id="reportbuilder.ReportImportService"
-          class="org.springframework.transaction.interceptor.TransactionProxyFactoryBean">
-        <property name="transactionManager" ref="transactionManager" />
-        <property name="target">
-            <bean class="org.openmrs.module.reportbuilder.api.impl.ReportImportServiceImpl">
-                <property name="dao" ref="reportbuilder.HibernateReportBuilderDAO" />
-            </bean>
-        </property>
-        <property name="preInterceptors" ref="serviceInterceptors" />
-        <property name="transactionAttributeSource" ref="transactionAttributeSource" />
-    </bean>
-
+    <!-- Service registration with OpenMRS context -->
     <bean parent="serviceContext">
         <property name="moduleService">
             <list>
                 <value>org.openmrs.module.reportbuilder.api.ReportBuilderService</value>
                 <ref bean="reportbuilder.ReportBuilderService" />
-                <value>org.openmrs.module.reportbuilder.api.ReportShippingService</value>
-                <ref bean="reportbuilder.ReportShippingService" />
-                <value>org.openmrs.module.reportbuilder.api.ReportImportService</value>
-                <ref bean="reportbuilder.ReportImportService" />
             </list>
         </property>
     </bean>

@@ -640,4 +640,123 @@ public interface ReportBuilderService extends OpenmrsService {
 	@Transactional
 	void purgeETLMonitor(ETLMonitor monitor);
 	
+	// ========== Report Shipping Methods ==========
+	
+	/**
+	 * Ship a single report to a distribution package. Exports the report definition and all
+	 * dependencies to the destination directory.
+	 * 
+	 * @param reportUuid UUID of the report to ship
+	 * @param version Version string for the distribution package
+	 * @param destination Destination directory for the exported files
+	 * @return ShippingResult containing details of the shipped report and dependencies
+	 */
+	org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipReport(String reportUuid, String version,
+	        File destination);
+	
+	/**
+	 * Ship multiple reports in a single distribution package.
+	 * 
+	 * @param reportUuids List of report UUIDs to ship
+	 * @param version Version string for the distribution package
+	 * @param destination Destination directory for the exported files
+	 * @return ShippingResult containing aggregated details
+	 */
+	org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipBatch(List<String> reportUuids, String version,
+	        File destination);
+	
+	/**
+	 * Export a single entity of a specific type to a file.
+	 * 
+	 * @param entityType Type of entity to export (e.g., "category", "indicator", "theme")
+	 * @param entityUuid UUID of the entity to export
+	 * @param destination Destination directory for the exported file
+	 * @return File containing the exported entity
+	 */
+	File exportEntity(String entityType, String entityUuid, File destination);
+	
+	/**
+	 * Get the default configuration directory for shipping.
+	 * 
+	 * @return Default shipping destination directory
+	 */
+	File getDefaultShippingDirectory();
+	
+	/**
+	 * Export all reports with their dependencies.
+	 * 
+	 * @param version Version string for the distribution package
+	 * @param destination Destination directory for the exported files
+	 * @return ShippingResult containing aggregated details
+	 */
+	org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipAllReports(String version, File destination);
+	
+	/**
+	 * Export all entities of specific types with their dependencies.
+	 * 
+	 * @param entityTypes List of entity types to export
+	 * @param version Version string for the distribution package
+	 * @param destination Destination directory for the exported files
+	 * @return ShippingResult containing aggregated details
+	 */
+	org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipAllEntities(java.util.List<String> entityTypes,
+	        String version, File destination);
+	
+	// ========== Report Import Methods ==========
+	
+	/**
+	 * Import all entities from a distribution directory.
+	 * 
+	 * @param sourceDir Source directory containing the distribution package
+	 * @return ImportResult containing summary, successes, and errors
+	 */
+	org.openmrs.module.reportbuilder.web.controller.dto.ImportResult importFromDirectory(File sourceDir);
+	
+	/**
+	 * Import a single entity from a file.
+	 * 
+	 * @param entityType Type of entity to import (e.g., "category", "indicator", "theme")
+	 * @param file File containing the entity definition
+	 * @return ImportResult for this single import operation
+	 */
+	org.openmrs.module.reportbuilder.web.controller.dto.ImportResult importEntity(String entityType, File file);
+	
+	/**
+	 * Validate a distribution package without importing.
+	 * 
+	 * @param sourceDir Source directory to validate
+	 * @return true if package is valid, false otherwise
+	 */
+	boolean validatePackage(File sourceDir);
+	
+	/**
+	 * Get the import order for entity types based on dependencies.
+	 * 
+	 * @return List of entity types in import order
+	 */
+	java.util.List<String> getImportOrder();
+	
+	// ========== Report Package Methods ==========
+	
+	/**
+	 * Get all available packages in the shipping directory.
+	 * 
+	 * @param search Optional search term to filter by name or version
+	 * @param status Optional status filter ("valid" or "invalid")
+	 * @param startIndex Starting index for pagination
+	 * @param limit Maximum number of results to return
+	 * @return List of package information for available packages
+	 */
+	java.util.List<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo> getAvailablePackages(String search,
+	        String status, Integer startIndex, Integer limit);
+	
+	/**
+	 * Get the total count of available packages matching the given filters.
+	 * 
+	 * @param search Optional search term to filter by name or version
+	 * @param status Optional status filter ("valid" or "invalid")
+	 * @return Total count of matching packages
+	 */
+	long getAvailablePackagesCount(String search, String status);
+	
 }

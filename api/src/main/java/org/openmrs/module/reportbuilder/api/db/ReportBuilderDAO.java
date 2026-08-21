@@ -37,6 +37,10 @@ public interface ReportBuilderDAO {
 	
 	long getReportBuilderIndicatorsCount(String qStr, ReportBuilderIndicator.Kind kind, boolean includeRetired);
 	
+	void retireReportBuilderIndicator(ReportBuilderIndicator indicator, String reason);
+	
+	void unretireReportBuilderIndicator(ReportBuilderIndicator indicator);
+	
 	void purgeReportBuilderIndicator(ReportBuilderIndicator indicator);
 	
 	ReportBuilderSection saveReportBuilderSection(ReportBuilderSection section);
@@ -113,6 +117,8 @@ public interface ReportBuilderDAO {
 	
 	void retireReportBuilderReport(ReportBuilderReport report, String reason);
 	
+	void unretireReportBuilderReport(ReportBuilderReport report);
+	
 	void purgeReportBuilderReport(ReportBuilderReport report);
 	
 	ReportCategory saveReportCategory(ReportCategory category);
@@ -144,6 +150,10 @@ public interface ReportBuilderDAO {
 	ReportLibrary getReportLibraryByBuilderReportUuid(String builderReportUuid);
 	
 	void purgeReportLibrary(ReportLibrary reportLibrary);
+	
+	void retireReportLibrary(ReportLibrary reportLibrary, String reason);
+	
+	void unretireReportLibrary(ReportLibrary reportLibrary);
 	
 	ETLSource saveETLSource(ETLSource etlSource);
 	

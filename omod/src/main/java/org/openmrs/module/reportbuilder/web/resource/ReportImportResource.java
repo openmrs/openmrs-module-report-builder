@@ -10,7 +10,7 @@
 package org.openmrs.module.reportbuilder.web.resource;
 
 import org.openmrs.api.context.Context;
-import org.openmrs.module.reportbuilder.api.ReportImportService;
+import org.openmrs.module.reportbuilder.api.ReportBuilderService;
 import org.openmrs.module.reportbuilder.web.controller.dto.ImportRequest;
 import org.openmrs.module.reportbuilder.web.controller.dto.ImportResult;
 import org.openmrs.module.webservices.rest.SimpleObject;
@@ -61,8 +61,8 @@ public class ReportImportResource extends DelegatingCrudResource<ImportResult> {
 		throw new UnsupportedOperationException("Import results cannot be purged");
 	}
 	
-	private ReportImportService getImportService() {
-		return Context.getService(ReportImportService.class);
+	private ReportBuilderService getImportService() {
+		return Context.getService(ReportBuilderService.class);
 	}
 	
 	/**
