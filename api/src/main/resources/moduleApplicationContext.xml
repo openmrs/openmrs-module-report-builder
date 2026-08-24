@@ -7,6 +7,9 @@
            http://www.springframework.org/schema/context
            http://www.springframework.org/schema/context/spring-context-3.0.xsd">
 
+    <!-- Enable annotation processing for @Autowired and other annotations -->
+    <context:annotation-config/>
+
     <!-- Enable component scanning for legacy report configuration beans -->
     <context:component-scan base-package="org.openmrs.module.reportbuilder.legacyconfig" />
 

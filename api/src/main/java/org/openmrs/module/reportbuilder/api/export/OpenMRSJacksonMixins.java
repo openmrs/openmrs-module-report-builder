@@ -18,7 +18,7 @@ import org.openmrs.User;
 
 /**
  * Jackson mixins to break circular references in OpenMRS entities during export. The issue:
- * BaseOpenmrsMetadata has creator/changedBy/voidedBy fields that reference User, which has person,
+ * BaseOpenmrsMetadata has creator/changedBy/retiredBy fields that reference User, which has person,
  * which has names, which has creator again, creating infinite loops. Solution: Use custom
  * serializers that output just the UUID/ID instead of the full object.
  */
@@ -53,8 +53,9 @@ public class OpenMRSJacksonMixins {
 	}
 	
 	/**
-	 * Mixin for BaseOpenmrsMetadata to serialize creator/changedBy/voidedBy as UUIDs This preserves
-	 * audit information while avoiding circular references
+	 * Mixin for BaseOpenmrsMetadata to serialize creator/changedBy/retiredBy as UUIDs and ensure
+	 * dateCreated/dateChanged/dateRetired/retireReason are exported for migration purposes. This
+	 * preserves audit information while avoiding circular references.
 	 */
 	public static abstract class BaseOpenmrsMetadataMixin {
 		
@@ -66,8 +67,23 @@ public class OpenMRSJacksonMixins {
 		@JsonDeserialize(using = ChangedByUuidDeserializer.class)
 		public abstract Object getChangedBy();
 		
-		@JsonSerialize(using = VoidedByUuidSerializer.class)
-		@JsonDeserialize(using = VoidedByUuidDeserializer.class)
-		public abstract Object getVoidedBy();
+		// OpenMRS BaseOpenmrsMetadata uses "retired" terminology, not "voided"
+		@JsonSerialize(using = RetiredByUuidSerializer.class)
+		@JsonDeserialize(using = RetiredByUuidDeserializer.class)
+		@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+		public abstract Object getRetiredBy();
+		
+		// Ensure date fields are included in export for migration purposes
+		@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+		public abstract java.util.Date getDateCreated();
+		
+		@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+		public abstract java.util.Date getDateChanged();
+		
+		@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+		public abstract java.util.Date getDateRetired();
+		
+		@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+		public abstract String getRetireReason();
 	}
 }

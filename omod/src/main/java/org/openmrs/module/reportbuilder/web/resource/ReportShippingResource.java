@@ -25,9 +25,12 @@ import org.openmrs.module.webservices.rest.web.representation.DefaultRepresentat
 import org.openmrs.module.webservices.rest.web.representation.FullRepresentation;
 import org.openmrs.module.webservices.rest.web.representation.Representation;
 import org.openmrs.module.webservices.rest.web.response.ResponseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.util.Collections;
+import java.util.List;
 
 /**
  * REST resource for shipping/exporting ReportBuilder reports. Provides endpoints to export reports
@@ -36,14 +39,27 @@ import java.util.Collections;
 @Resource(name = RestConstants.VERSION_1 + "/reportbuilder/ship", supportedClass = ShippingResult.class, supportedOpenmrsVersions = { "1.8 - 9.0.*" })
 public class ReportShippingResource extends DelegatingCrudResource<ShippingResult> {
 	
+	private static final Logger log = LoggerFactory.getLogger(ReportShippingResource.class);
+	
 	@Override
 	public ShippingResult newDelegate() {
 		return new ShippingResult();
 	}
 	
 	@Override
+	public Object create(SimpleObject post, RequestContext context) throws ResponseException {
+		return post(post, context);
+	}
+	
+	@Override
 	public ShippingResult save(ShippingResult delegate) {
 		throw new UnsupportedOperationException("Use POST to ship reports");
+	}
+	
+	@Override
+	public DelegatingResourceDescription getCreatableProperties() {
+		// Shipping resource doesn't support standard creation properties
+		return new DelegatingResourceDescription();
 	}
 	
 	@Override
@@ -76,13 +92,23 @@ public class ReportShippingResource extends DelegatingCrudResource<ShippingResul
 	 */
 	public Object post(Object shippingRequest, RequestContext context) throws ResponseException {
 		try {
+			// Log incoming request for debugging
+			log.debug("Received shipping request: {}", shippingRequest);
+			log.debug("Request type: {}", shippingRequest != null ? shippingRequest.getClass().getName() : "null");
+			
 			// Convert request to ShippingRequest
 			ShippingRequest request;
 			if (shippingRequest instanceof ShippingRequest) {
 				request = (ShippingRequest) shippingRequest;
 			} else if (shippingRequest instanceof SimpleObject) {
-				request = convertToShippingRequest((SimpleObject) shippingRequest);
+				SimpleObject simpleObj = (SimpleObject) shippingRequest;
+				log.debug("SimpleObject contents: {}", simpleObj);
+				request = convertToShippingRequest(simpleObj);
+				log.debug("Converted request - reportUuid: {}, version: {}, destination: {}",
+				    new Object[] { request.getReportUuid(), request.getVersion(), request.getDestination() });
 			} else {
+				log.error("Invalid request format: {}", shippingRequest != null ? shippingRequest.getClass().getName()
+				        : "null");
 				throw new IllegalArgumentException("Invalid request format");
 			}
 			
@@ -94,30 +120,30 @@ public class ReportShippingResource extends DelegatingCrudResource<ShippingResul
 				destination = getShippingService().getDefaultShippingDirectory();
 			}
 			
-			// Validate inputs
-			if (request.getReportUuid() == null || request.getReportUuid().trim().isEmpty()) {
-				throw new IllegalArgumentException("reportUuid is required");
-			}
-			if (request.getVersion() == null || request.getVersion().trim().isEmpty()) {
-				throw new IllegalArgumentException("version is required");
+			// Auto-generate version if not provided
+			String version = request.getVersion();
+			if (version == null || version.trim().isEmpty()) {
+				version = generateVersion();
+				log.debug("Auto-generated version: {}", version);
 			}
 			
-			// Execute shipping
-			ShippingResult result = getShippingService().shipReport(request.getReportUuid(), request.getVersion(),
-			    destination);
+			// Execute bulk export - all ReportBuilder artifacts and compiled reports
+			log.debug("Starting bulk export of all ReportBuilder artifacts and compiled reports with version: {}", version);
+			ShippingResult result = getShippingService().shipAllReports(version, destination);
 			
 			// Build response
 			SimpleObject response = new SimpleObject();
 			response.put("success", result.isSuccess());
-			response.put("message", result.isSuccess() ? "Report shipped successfully to " + destination.getAbsolutePath()
-			        : "Failed to ship report: " + result.getErrorMessage());
+			response.put("message",
+			    result.isSuccess() ? "All artifacts extracted successfully to " + destination.getAbsolutePath()
+			            : "Failed to extract artifacts: " + result.getErrorMessage());
 			response.put("data", resultToSimpleObject(result));
 			
 			return response;
 			
 		}
 		catch (Exception e) {
-			throw new IllegalArgumentException("Failed to ship report: " + e.getMessage(), e);
+			throw new IllegalArgumentException("Failed to extract artifacts: " + e.getMessage(), e);
 		}
 	}
 	
@@ -275,7 +301,7 @@ public class ReportShippingResource extends DelegatingCrudResource<ShippingResul
 			}
 			
 			// Extract entity types
-			java.util.List<String> entityTypes = (java.util.List<String>) requestObj.get("entityTypes");
+			List<String> entityTypes = (List<String>) requestObj.get("entityTypes");
 			String version = (String) requestObj.get("version");
 			String destinationPath = (String) requestObj.get("destination");
 			
@@ -312,5 +338,13 @@ public class ReportShippingResource extends DelegatingCrudResource<ShippingResul
 		catch (Exception e) {
 			throw new IllegalArgumentException("Failed to complete bulk export: " + e.getMessage(), e);
 		}
+	}
+	
+	/**
+	 * Generate a version string based on current timestamp Format: YYYY.MM.DD-HHMM
+	 */
+	private String generateVersion() {
+		java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy.MM.dd-HHmm");
+		return sdf.format(new java.util.Date());
 	}
 }

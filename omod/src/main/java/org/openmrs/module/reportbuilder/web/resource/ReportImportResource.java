@@ -47,6 +47,17 @@ public class ReportImportResource extends DelegatingCrudResource<ImportResult> {
 	}
 	
 	@Override
+	public Object create(SimpleObject post, RequestContext context) throws ResponseException {
+		return post(post, context);
+	}
+	
+	@Override
+	public DelegatingResourceDescription getCreatableProperties() {
+		// Import resource doesn't support standard creation properties
+		return new DelegatingResourceDescription();
+	}
+	
+	@Override
 	public ImportResult getByUniqueId(String uniqueId) {
 		throw new UnsupportedOperationException("Import results are not retrievable by ID");
 	}
@@ -67,7 +78,8 @@ public class ReportImportResource extends DelegatingCrudResource<ImportResult> {
 	
 	/**
 	 * POST handler for importing reports from a directory. Expected request body: {
-	 * "sourceDirectory": "/path/to/distribution/package" }
+	 * "sourceDirectory": "/path/to/distribution/package" // optional - uses default if not provided
+	 * }
 	 * 
 	 * @param importRequest The import request
 	 * @param context The request context
@@ -85,14 +97,16 @@ public class ReportImportResource extends DelegatingCrudResource<ImportResult> {
 				throw new IllegalArgumentException("Invalid request format");
 			}
 			
-			// Validate inputs
-			if (request.getSourceDirectory() == null || request.getSourceDirectory().trim().isEmpty()) {
-				throw new IllegalArgumentException("sourceDirectory is required");
+			// Determine source directory
+			File sourceDir;
+			if (request.getSourceDirectory() != null && !request.getSourceDirectory().trim().isEmpty()) {
+				sourceDir = new File(request.getSourceDirectory());
+			} else {
+				sourceDir = getImportService().getDefaultImportDirectory();
 			}
 			
-			File sourceDir = new File(request.getSourceDirectory());
 			if (!sourceDir.exists() || !sourceDir.isDirectory()) {
-				throw new IllegalArgumentException("Invalid source directory: " + request.getSourceDirectory());
+				throw new IllegalArgumentException("Invalid source directory: " + sourceDir.getAbsolutePath());
 			}
 			
 			// Validate package structure (optional but recommended)

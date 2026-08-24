@@ -683,6 +683,14 @@ public interface ReportBuilderService extends OpenmrsService {
 	File getDefaultShippingDirectory();
 	
 	/**
+	 * Get the default configuration directory for import. Returns the same directory as the default
+	 * shipping directory, allowing seamless import from packages exported to the default location.
+	 * 
+	 * @return Default import source directory
+	 */
+	File getDefaultImportDirectory();
+	
+	/**
 	 * Export all reports with their dependencies.
 	 * 
 	 * @param version Version string for the distribution package

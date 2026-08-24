@@ -53,6 +53,7 @@ import org.openmrs.module.reportbuilder.util.ReportDesignHtmlRenderer;
 import org.openmrs.module.reportbuilder.util.data.definition.AggregateReportDataSetDefinition;
 import org.openmrs.module.reportbuilder.util.data.definition.LineListDataSetDefinition;
 import org.openmrs.module.reportbuilder.validation.ReportValidationResult;
+import org.openmrs.module.reportbuilder.web.controller.dto.*;
 import org.openmrs.module.reporting.common.DateUtil;
 import org.openmrs.module.reporting.common.MessageUtil;
 import org.openmrs.module.reporting.common.ObjectUtil;
@@ -465,6 +466,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public ReportBuilderIndicator saveReportBuilderIndicator(ReportBuilderIndicator indicator) {
 		try {
 			IndicatorValidator.validate(indicator);
@@ -539,11 +541,13 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public void purgeReportBuilderIndicator(ReportBuilderIndicator indicator) {
 		dao.purgeReportBuilderIndicator(indicator);
 	}
 	
 	@Override
+	@Transactional
 	public ReportBuilderSection saveReportBuilderSection(ReportBuilderSection section) {
 		return dao.saveReportBuilderSection(section);
 	}
@@ -635,6 +639,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public void retireReportBuilderDataTheme(ReportBuilderDataTheme theme, String reason) {
 		theme.setRetired(true);
 		theme.setRetireReason(reason);
@@ -642,6 +647,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public void unretireReportBuilderDataTheme(ReportBuilderDataTheme theme) {
 		theme.setRetired(false);
 		theme.setRetireReason(null);
@@ -666,6 +672,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public ReportBuilderAgeCategory saveAgeCategory(ReportBuilderAgeCategory category) {
 		return dao.saveAgeCategory(category);
 	}
@@ -696,6 +703,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public void retireAgeCategory(ReportBuilderAgeCategory category, String reason) {
 		category.setRetired(true);
 		category.setRetireReason(reason);
@@ -703,6 +711,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public void unretireAgeCategory(ReportBuilderAgeCategory category) {
 		category.setRetired(false);
 		category.setRetireReason(null);
@@ -1780,6 +1789,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public ReportCategory saveReportCategory(ReportCategory category) {
 		if (category.getUuid() == null) {
 			category.setUuid(UUID.randomUUID().toString());
@@ -3168,6 +3178,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	// =========================================================
 	
 	@Override
+	@Transactional
 	public ETLMonitor saveETLMonitor(ETLMonitor monitor) {
 		if (monitor.getUuid() == null) {
 			monitor.setUuid(UUID.randomUUID().toString());
@@ -3211,6 +3222,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public void retireETLMonitor(ETLMonitor monitor, String reason) {
 		monitor.setRetired(true);
 		monitor.setRetireReason(reason);
@@ -3218,6 +3230,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public void unretireETLMonitor(ETLMonitor monitor) {
 		monitor.setRetired(false);
 		monitor.setRetireReason(null);
@@ -3225,6 +3238,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
+	@Transactional
 	public void purgeETLMonitor(ETLMonitor monitor) {
 		dao.purgeETLMonitor(monitor);
 	}
@@ -3238,15 +3252,15 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	    "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "library");
 	
 	@Override
-	public org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipReport(String reportUuid, String version,
+	public ShippingResult shipReport(String reportUuid, String version,
 	        File destination) {
-		org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult();
+		ShippingResult result = new ShippingResult();
 		
 		try {
 			log.info("Shipping report: {} version: {} to: {}", reportUuid, version, destination.getAbsolutePath());
 			
 			// Validate report exists
-			ReportBuilderReport report = dao.getReportBuilderReportByUuid(reportUuid);
+			ReportBuilderReport report = getReportBuilderReportByUuid(reportUuid);
 			if (report == null) {
 				result.setSuccess(false);
 				result.setErrorMessage("Report not found with UUID: " + reportUuid);
@@ -3290,9 +3304,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
-	public org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipBatch(java.util.List<String> reportUuids,
+	public ShippingResult shipBatch(java.util.List<String> reportUuids,
 	        String version, File destination) {
-		org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult();
+		ShippingResult result = new ShippingResult();
 		java.util.Set<String> combinedDependencies = new java.util.HashSet<>();
 
 		try {
@@ -3304,7 +3318,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 
 			// Process each report and collect dependencies
 			for (String reportUuid : reportUuids) {
-				ReportBuilderReport report = dao.getReportBuilderReportByUuid(reportUuid);
+				ReportBuilderReport report = getReportBuilderReportByUuid(reportUuid);
 				if (report == null) {
 					log.warn("Report not found with UUID: {}, skipping", reportUuid);
 					continue;
@@ -3341,31 +3355,31 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		try {
 			switch (entityType.toLowerCase()) {
 				case "category":
-					ReportCategory category = dao.getReportCategoryByUuid(entityUuid);
+					ReportCategory category = getReportCategoryByUuid(entityUuid);
 					if (category != null) {
 						return exportCategory(category, destination);
 					}
 					break;
 				case "indicator":
-					ReportBuilderIndicator indicator = dao.getReportBuilderIndicatorByUuid(entityUuid);
+					ReportBuilderIndicator indicator = getReportBuilderIndicatorByUuid(entityUuid);
 					if (indicator != null) {
 						return exportIndicator(indicator, destination);
 					}
 					break;
 				case "section":
-					ReportBuilderSection section = dao.getReportBuilderSectionByUuid(entityUuid);
+					ReportBuilderSection section = getReportBuilderSectionByUuid(entityUuid);
 					if (section != null) {
 						return exportSection(section, destination);
 					}
 					break;
 				case "theme":
-					ReportBuilderDataTheme theme = dao.getReportBuilderDataThemeByUuid(entityUuid);
+					ReportBuilderDataTheme theme = getReportBuilderDataThemeByUuid(entityUuid);
 					if (theme != null) {
 						return exportTheme(theme, destination);
 					}
 					break;
 				case "age-category":
-					ReportBuilderAgeCategory ageCategory = dao.getAgeCategoryByUuid(entityUuid);
+					ReportBuilderAgeCategory ageCategory = getAgeCategoryByUuid(entityUuid);
 					if (ageCategory != null) {
 						return exportAgeCategory(ageCategory, destination);
 					}
@@ -3374,7 +3388,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 					// Age groups use ID instead of UUID
 					try {
 						Integer ageGroupId = Integer.parseInt(entityUuid);
-						ReportBuilderAgeGroup ageGroup = dao.getAgeGroupById(ageGroupId);
+						ReportBuilderAgeGroup ageGroup = getAgeGroupById(ageGroupId);
 						if (ageGroup != null) {
 							return exportAgeGroup(ageGroup, destination);
 						}
@@ -3384,19 +3398,19 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 					}
 					break;
 				case "etl-source":
-					ETLSource etlSource = dao.getETLSourceByUuid(entityUuid);
+					ETLSource etlSource = getETLSourceByUuid(entityUuid);
 					if (etlSource != null) {
 						return exportETLSource(etlSource, destination);
 					}
 					break;
 				case "etl-monitor":
-					ETLMonitor etlMonitor = dao.getETLMonitorByUuid(entityUuid);
+					ETLMonitor etlMonitor = getETLMonitorByUuid(entityUuid);
 					if (etlMonitor != null) {
 						return exportETLMonitor(etlMonitor, destination);
 					}
 					break;
 				case "library":
-					ReportLibrary library = dao.getReportLibraryByUuid(entityUuid);
+					ReportLibrary library = getReportLibraryByUuid(entityUuid);
 					if (library != null) {
 						return exportLibrary(library, destination);
 					}
@@ -3427,38 +3441,31 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
-	public org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipAllReports(String version, File destination) {
-		log.info("Starting export of all reports, version: {}", version);
-		
-		List<ReportBuilderReport> allReports = getReportBuilderReports(null, false, null, null);
-		
-		if (allReports == null || allReports.isEmpty()) {
-			log.warn("No reports found to export");
-			org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult();
-			result.setSuccess(false);
-			result.setErrorMessage("No reports found in the system");
-			return result;
-		}
-		
-		log.info("Found {} reports to export", allReports.size());
-		
-		// Collect all report UUIDs
-		List<String> reportUuids = new ArrayList<String>();
-		for (ReportBuilderReport report : allReports) {
-			reportUuids.add(report.getUuid());
-		}
-		
-		// Use existing batch shipping method
-		return shipBatch(reportUuids, version, destination);
+	public File getDefaultImportDirectory() {
+		// Import and export use the same default directory
+		return getDefaultShippingDirectory();
 	}
 	
 	@Override
-	public org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipAllEntities(
+	@Transactional(readOnly = true)
+	public ShippingResult shipAllReports(String version, File destination) {
+		log.info("Starting export of all ReportBuilder artifacts and reports, version: {}", version);
+		
+		// Export all artifacts including reports, indicators, themes, sections, categories, etc.
+		List<String> allEntityTypes = java.util.Arrays.asList("reports", "categories", "library", "indicators", "sections",
+		    "themes", "age-categories", "age-groups", "etl-sources", "etl-monitors");
+		
+		return shipAllEntities(allEntityTypes, version, destination);
+	}
+	
+	@Override
+	@Transactional(readOnly = true)
+	public ShippingResult shipAllEntities(
 	        java.util.List<String> entityTypes, String version, File destination) {
 		log.info("Starting bulk export of entity types: {}, version: {} to {}", entityTypes, version,
 		    destination.getAbsolutePath());
 
-		org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult();
+		ShippingResult result = new ShippingResult();
 		result.setVersion(version);
 		result.setSuccess(true);
 
@@ -3647,8 +3654,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	    "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "library");
 	
 	@Override
-	public org.openmrs.module.reportbuilder.web.controller.dto.ImportResult importFromDirectory(File sourceDir) {
-		org.openmrs.module.reportbuilder.web.controller.dto.ImportResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ImportResult();
+	@Transactional
+	public ImportResult importFromDirectory(File sourceDir) {
+		ImportResult result = new ImportResult();
 		result.setSummary("Import from directory: " + sourceDir.getAbsolutePath());
 		
 		try {
@@ -3664,7 +3672,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			}
 			
 			// Read version manifest if available
-			org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata versionManifest = readVersionManifest(reportbuilderDir);
+			VersionMetadata versionManifest = readVersionManifest(reportbuilderDir);
 			if (versionManifest != null && versionManifest.getPackageInfo() != null) {
 				log.info("Found version manifest: {} version {}", versionManifest.getPackageInfo().getName(),
 				    versionManifest.getPackageInfo().getVersion());
@@ -3709,8 +3717,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	@Override
-	public org.openmrs.module.reportbuilder.web.controller.dto.ImportResult importEntity(String entityType, File file) {
-		org.openmrs.module.reportbuilder.web.controller.dto.ImportResult result = new org.openmrs.module.reportbuilder.web.controller.dto.ImportResult();
+	public ImportResult importEntity(String entityType, File file) {
+		ImportResult result = new ImportResult();
 		
 		try {
 			String filename = file.getName();
@@ -3858,7 +3866,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * Export all dependencies for a report
 	 */
 	private void exportShippingDependencies(ReportBuilderReport report, File destination,
-	        org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result) {
+	        ShippingResult result) {
 		// Export category if present
 		if (report.getCategory() != null) {
 			File file = exportCategory(report.getCategory(), destination);
@@ -3921,7 +3929,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	private File exportCompiledReport(ReportBuilderReport report,
 	        com.fasterxml.jackson.databind.node.ObjectNode compiledConfig, File destination) {
 		try {
-			org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport serialized = new org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport(
+			SerializedReport serialized = new SerializedReport(
 			        report, compiledConfig);
 			serialized.setCompiledAt(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ").format(new Date()));
 			serialized.setCompiledBy(Context.getAuthenticatedUser() != null ? Context.getAuthenticatedUser().getUsername()
@@ -3955,8 +3963,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * Generate version metadata file
 	 */
 	private File generateVersionMetadata(ReportBuilderReport report, String version,
-	        org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult result, File destination) throws IOException {
-		org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata metadata = new org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata();
+	        ShippingResult result, File destination) throws IOException {
+		VersionMetadata metadata = new VersionMetadata();
 		
 		// Package info
 		metadata.getPackageInfo().setName(report.getCode() != null ? report.getCode() : report.getUuid());
@@ -3968,7 +3976,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		metadata.getPackageInfo().setReportBuilderVersion("1.0.0");
 		
 		// Contents
-		org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.ReportInfo reportInfo = new org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.ReportInfo(
+		VersionMetadata.ReportInfo reportInfo = new VersionMetadata.ReportInfo(
 		        report.getUuid(), report.getCode() != null ? report.getCode() : report.getUuid(),
 		        report.getReportType() != null ? report.getReportType().name() : "AGGREGATE", result.getSourceFile(),
 		        result.getCompiledFile());
@@ -4001,7 +4009,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 */
 	private void createShippingVersionFile(File destination, String version) {
 		try {
-			org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata metadata = new org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata();
+			VersionMetadata metadata = new VersionMetadata();
 			
 			// Package info
 			metadata.getPackageInfo().setName("bulk-export");
@@ -4232,7 +4240,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	/**
 	 * Import all entities of a specific type from a directory
 	 */
-	private void importType(String type, File dir, org.openmrs.module.reportbuilder.web.controller.dto.ImportResult result) {
+	private void importType(String type, File dir, ImportResult result) {
 		File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
 
 		if (files == null || files.length == 0) {
@@ -4242,6 +4250,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		log.info("Importing {} entities from: {}", type, dir.getAbsolutePath());
 
 		for (File file : files) {
+			String fileName = file.getName();
+			log.info("[IMPORT] Starting import: type={}, file={}", type, fileName);
+
 			try {
 				switch (type) {
 					case "categories":
@@ -4278,12 +4289,13 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 						log.warn("Unknown import type: {}", type);
 						continue;
 				}
-				result.addSuccess(type, file.getName());
+				log.info("[IMPORT] Successfully imported: type={}, file={}", type, fileName);
+				result.addSuccess(type, fileName);
 
 			}
 			catch (Exception e) {
-				log.error("Failed to import: {}", file.getName(), e);
-				result.addError(type, file.getName(), e.getMessage());
+				log.error("[IMPORT] Failed to import: type={}, file={}, error={}", type, fileName, e.getMessage(), e);
+				result.addError(type, fileName, e.getMessage());
 			}
 		}
 	}
@@ -4292,7 +4304,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * Import compiled reports from reports directory
 	 */
 	private void importCompiledReports(File reportsDir,
-	        org.openmrs.module.reportbuilder.web.controller.dto.ImportResult result) {
+	        ImportResult result) {
 		File[] subdirs = reportsDir.listFiles(File::isDirectory);
 
 		if (subdirs == null) {
@@ -4330,7 +4342,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	/**
 	 * Read version manifest from package directory
 	 */
-	private org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata readVersionManifest(File packageDir) {
+	private VersionMetadata readVersionManifest(File packageDir) {
 		try {
 			File versionFile = new File(packageDir, "version.json");
 			if (!versionFile.exists()) {
@@ -4340,7 +4352,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			
 			String jsonContent = new String(java.nio.file.Files.readAllBytes(versionFile.toPath()), StandardCharsets.UTF_8);
 			return objectMapper.readValue(jsonContent,
-			    org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.class);
+			    VersionMetadata.class);
 		}
 		catch (Exception e) {
 			log.warn("Failed to read version manifest: {}", e.getMessage());
@@ -4359,7 +4371,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
 		
 		String uuid = node.get("uuid").asText();
-		ReportCategory existing = dao.getReportCategoryByUuid(uuid);
+		ReportCategory existing = getReportCategoryByUuid(uuid);
 		
 		if (existing != null) {
 			// Update existing
@@ -4371,7 +4383,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("retired")) {
 				existing.setRetired(node.get("retired").asInt() == 1);
 			}
-			dao.saveReportCategory(existing);
+			saveReportCategory(existing);
 			log.debug("Updated existing category: {}", existing.getName());
 		} else {
 			// Create new
@@ -4384,7 +4396,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("retired")) {
 				category.setRetired(node.get("retired").asInt() == 1);
 			}
-			dao.saveReportCategory(category);
+			saveReportCategory(category);
 			log.debug("Created new category: {}", category.getName());
 		}
 	}
@@ -4394,15 +4406,15 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * that are exported
 	 */
 	private void importLibraryEntry(File file) throws IOException {
-		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		JsonNode node = readEntityFile(file);
 		
 		String uuid = node.get("uuid").asText();
-		ReportLibrary existing = dao.getReportLibraryByUuid(uuid);
+		ReportLibrary existing = getReportLibraryByUuid(uuid);
 		
-		// Extract meta_json as JSON string
+		// Extract metaJson as JSON string (export uses camelCase)
 		String metaJson = null;
-		if (node.has("meta_json") && !node.get("meta_json").isNull()) {
-			metaJson = objectMapper.writeValueAsString(node.get("meta_json"));
+		if (node.has("metaJson") && !node.get("metaJson").isNull()) {
+			metaJson = objectMapper.writeValueAsString(node.get("metaJson"));
 		}
 		
 		if (existing != null) {
@@ -4418,41 +4430,41 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			}
 			
 			// Import sourceType field
-			if (node.has("source_type") && !node.get("source_type").isNull()) {
+			if (node.has("sourceType") && !node.get("sourceType").isNull()) {
 				try {
-					existing.setSourceType(node.get("source_type").asText());
+					existing.setSourceType(node.get("sourceType").asText());
 				}
 				catch (IllegalArgumentException e) {
-					log.warn("Invalid source_type value: {}", node.get("source_type").asText());
+					log.warn("Invalid sourceType value: {}", node.get("sourceType").asText());
 				}
 			}
 			
 			// Import reportDefinitionUuid field
-			if (node.has("report_definition_uuid") && !node.get("report_definition_uuid").isNull()) {
-				existing.setReportDefinitionUuid(node.get("report_definition_uuid").asText());
+			if (node.has("reportDefinitionUuid") && !node.get("reportDefinitionUuid").isNull()) {
+				existing.setReportDefinitionUuid(node.get("reportDefinitionUuid").asText());
 			}
 			
 			// Import reportBuilderReportUuid field
-			if (node.has("report_builder_report_uuid") && !node.get("report_builder_report_uuid").isNull()) {
-				existing.setReportBuilderReportUuid(node.get("report_builder_report_uuid").asText());
+			if (node.has("reportBuilderReportUuid") && !node.get("reportBuilderReportUuid").isNull()) {
+				existing.setReportBuilderReportUuid(node.get("reportBuilderReportUuid").asText());
 			}
 			
-			// Handle category reference via category_uuid
-			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
-				String categoryUuid = node.get("category_uuid").asText();
-				ReportCategory category = dao.getReportCategoryByUuid(categoryUuid);
+			// Handle category reference via categoryUuid
+			if (node.has("categoryUuid") && !node.get("categoryUuid").isNull()) {
+				String categoryUuid = node.get("categoryUuid").asText();
+				ReportCategory category = getReportCategoryByUuid(categoryUuid);
 				if (category != null) {
 					existing.setCategory(category);
 				}
 			}
 			
 			// Import reportType field
-			if (node.has("report_type") && !node.get("report_type").isNull()) {
+			if (node.has("reportType") && !node.get("reportType").isNull()) {
 				try {
-					existing.setReportType(node.get("report_type").asText());
+					existing.setReportType(node.get("reportType").asText());
 				}
 				catch (IllegalArgumentException e) {
-					log.warn("Invalid report_type value: {}", node.get("report_type").asText());
+					log.warn("Invalid reportType value: {}", node.get("reportType").asText());
 				}
 			}
 			
@@ -4469,14 +4481,14 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			// Handle retired status
 			if (node.has("retired")) {
 				existing.setRetired(node.get("retired").asBoolean());
-				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
-					dao.retireReportLibrary(existing, node.get("retire_reason").asText());
+				if (node.has("retireReason") && !node.get("retireReason").isNull()) {
+					dao.retireReportLibrary(existing, node.get("retireReason").asText());
 				}
 			} else {
 				dao.unretireReportLibrary(existing);
 			}
 			
-			dao.saveReportLibrary(existing);
+			saveReportLibrary(existing);
 			log.debug("Updated existing library entry: {}", existing.getName());
 		} else {
 			// Create new - all fields
@@ -4493,41 +4505,41 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			}
 			
 			// Import sourceType field
-			if (node.has("source_type") && !node.get("source_type").isNull()) {
+			if (node.has("sourceType") && !node.get("sourceType").isNull()) {
 				try {
-					library.setSourceType(node.get("source_type").asText());
+					library.setSourceType(node.get("sourceType").asText());
 				}
 				catch (IllegalArgumentException e) {
-					log.warn("Invalid source_type value: {}", node.get("source_type").asText());
+					log.warn("Invalid sourceType value: {}", node.get("sourceType").asText());
 				}
 			}
 			
 			// Import reportDefinitionUuid field
-			if (node.has("report_definition_uuid") && !node.get("report_definition_uuid").isNull()) {
-				library.setReportDefinitionUuid(node.get("report_definition_uuid").asText());
+			if (node.has("reportDefinitionUuid") && !node.get("reportDefinitionUuid").isNull()) {
+				library.setReportDefinitionUuid(node.get("reportDefinitionUuid").asText());
 			}
 			
 			// Import reportBuilderReportUuid field
-			if (node.has("report_builder_report_uuid") && !node.get("report_builder_report_uuid").isNull()) {
-				library.setReportBuilderReportUuid(node.get("report_builder_report_uuid").asText());
+			if (node.has("reportBuilderReportUuid") && !node.get("reportBuilderReportUuid").isNull()) {
+				library.setReportBuilderReportUuid(node.get("reportBuilderReportUuid").asText());
 			}
 			
-			// Handle category reference via category_uuid
-			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
-				String categoryUuid = node.get("category_uuid").asText();
-				ReportCategory category = dao.getReportCategoryByUuid(categoryUuid);
+			// Handle category reference via categoryUuid
+			if (node.has("categoryUuid") && !node.get("categoryUuid").isNull()) {
+				String categoryUuid = node.get("categoryUuid").asText();
+				ReportCategory category = getReportCategoryByUuid(categoryUuid);
 				if (category != null) {
 					library.setCategory(category);
 				}
 			}
 			
 			// Import reportType field
-			if (node.has("report_type") && !node.get("report_type").isNull()) {
+			if (node.has("reportType") && !node.get("reportType").isNull()) {
 				try {
-					library.setReportType(node.get("report_type").asText());
+					library.setReportType(node.get("reportType").asText());
 				}
 				catch (IllegalArgumentException e) {
-					log.warn("Invalid report_type value: {}", node.get("report_type").asText());
+					log.warn("Invalid reportType value: {}", node.get("reportType").asText());
 				}
 			}
 			
@@ -4541,12 +4553,12 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				library.setMetaJson(metaJson);
 			}
 			
-			dao.saveReportLibrary(library);
+			saveReportLibrary(library);
 			
 			// Handle retired status after save
 			if (node.has("retired") && node.get("retired").asBoolean()) {
-				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
-					dao.retireReportLibrary(library, node.get("retire_reason").asText());
+				if (node.has("retireReason") && !node.get("retireReason").isNull()) {
+					dao.retireReportLibrary(library, node.get("retireReason").asText());
 				}
 			}
 			
@@ -4559,19 +4571,26 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * fields that are exported
 	 */
 	private void importIndicator(File file) throws IOException {
+		log.info("[IMPORT] Processing indicator file: {}", file.getName());
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
 		
 		String uuid = node.get("uuid").asText();
-		ReportBuilderIndicator existing = dao.getReportBuilderIndicatorByUuid(uuid);
+		ReportBuilderIndicator existing = getReportBuilderIndicatorByUuid(uuid);
 		
-		// Extract config_json and meta_json as JSON strings
+		// Extract configJson and metaJson as JSON strings (export uses camelCase)
 		String configJson = null;
 		String metaJson = null;
-		if (node.has("config_json") && !node.get("config_json").isNull()) {
-			configJson = objectMapper.writeValueAsString(node.get("config_json"));
+		if (node.has("configJson") && !node.get("configJson").isNull()) {
+			configJson = objectMapper.writeValueAsString(node.get("configJson"));
 		}
-		if (node.has("meta_json") && !node.get("meta_json").isNull()) {
-			metaJson = objectMapper.writeValueAsString(node.get("meta_json"));
+		if (node.has("metaJson") && !node.get("metaJson").isNull()) {
+			metaJson = objectMapper.writeValueAsString(node.get("metaJson"));
+		}
+		
+		// CRITICAL: Provide default configJson if missing (database constraint requires non-null)
+		if (configJson == null || configJson.trim().isEmpty()) {
+			configJson = "{}";
+			log.warn("Missing configJson for indicator {}, using default empty object", uuid);
 		}
 		
 		if (existing != null) {
@@ -4581,9 +4600,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				existing.setDescription(node.get("description").asText());
 			}
 			existing.setCode(node.get("code").asText());
-			if (configJson != null) {
-				existing.setConfigJson(configJson);
-			}
+			// Always set configJson (has default value from above)
+			existing.setConfigJson(configJson);
 			if (metaJson != null) {
 				existing.setMetaJson(metaJson);
 			}
@@ -4599,43 +4617,69 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			}
 			
 			// Import defaultValueType field
-			if (node.has("default_value_type") && !node.get("default_value_type").isNull()) {
+			if (node.has("defaultValueType") && !node.get("defaultValueType").isNull()) {
 				try {
-					existing.setDefaultValueType(ReportBuilderIndicator.ValueType.valueOf(node.get("default_value_type")
+					existing.setDefaultValueType(ReportBuilderIndicator.ValueType.valueOf(node.get("defaultValueType")
 					        .asText()));
 				}
 				catch (IllegalArgumentException e) {
-					log.warn("Invalid default_value_type value: {}", node.get("default_value_type").asText());
+					log.warn("Invalid defaultValueType value: {}", node.get("defaultValueType").asText());
 				}
 			}
 			
 			// Import themeUuid field
-			if (node.has("theme_uuid") && !node.get("theme_uuid").isNull()) {
-				existing.setThemeUuid(node.get("theme_uuid").asText());
+			if (node.has("themeUuid") && !node.get("themeUuid").isNull()) {
+				existing.setThemeUuid(node.get("themeUuid").asText());
 			}
 			
 			// Import sqlTemplate field
-			if (node.has("sql_template") && !node.get("sql_template").isNull()) {
-				existing.setSqlTemplate(node.get("sql_template").asText());
+			if (node.has("sqlTemplate") && !node.get("sqlTemplate").isNull()) {
+				existing.setSqlTemplate(node.get("sqlTemplate").asText());
 			}
 			
 			// Import denominatorSqlTemplate field
-			if (node.has("denominator_sql_template") && !node.get("denominator_sql_template").isNull()) {
-				existing.setDenominatorSqlTemplate(node.get("denominator_sql_template").asText());
+			if (node.has("denominatorSqlTemplate") && !node.get("denominatorSqlTemplate").isNull()) {
+				existing.setDenominatorSqlTemplate(node.get("denominatorSqlTemplate").asText());
 			}
 			
 			// Handle retired status
 			if (node.has("retired")) {
 				existing.setRetired(node.get("retired").asBoolean());
-				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
-					dao.retireReportBuilderIndicator(existing, node.get("retire_reason").asText());
+				if (node.has("retireReason") && !node.get("retireReason").isNull()) {
+					dao.retireReportBuilderIndicator(existing, node.get("retireReason").asText());
 				}
 			} else {
 				dao.unretireReportBuilderIndicator(existing);
 			}
 			
-			dao.saveReportBuilderIndicator(existing);
-			log.debug("Updated existing indicator: {}", existing.getName());
+			// Import audit fields if present (for migration purposes)
+			if (node.has("creator") && !node.get("creator").isNull()) {
+				try {
+					String creatorUuid = node.get("creator").asText();
+					if (creatorUuid != null && !creatorUuid.isEmpty() && !creatorUuid.equals("null")) {
+						org.openmrs.User creator = Context.getService(org.openmrs.api.UserService.class).getUserByUuid(
+						    creatorUuid);
+						if (creator != null) {
+							existing.setCreator(creator);
+						}
+					}
+				}
+				catch (Exception e) {
+					log.debug("Could not set creator for indicator: {}", e.getMessage());
+				}
+			}
+			if (node.has("dateCreated") && !node.get("dateCreated").isNull()) {
+				try {
+					long dateCreated = node.get("dateCreated").asLong();
+					existing.setDateCreated(new java.util.Date(dateCreated));
+				}
+				catch (Exception e) {
+					log.debug("Could not set dateCreated for indicator: {}", e.getMessage());
+				}
+			}
+			
+			saveReportBuilderIndicator(existing);
+			log.info("[IMPORT] Successfully updated indicator: {} ({})", existing.getName(), file.getName());
 		} else {
 			// Create new - all fields
 			ReportBuilderIndicator indicator = new ReportBuilderIndicator();
@@ -4645,9 +4689,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				indicator.setDescription(node.get("description").asText());
 			}
 			indicator.setCode(node.get("code").asText());
-			if (configJson != null) {
-				indicator.setConfigJson(configJson);
-			}
+			// Always set configJson (has default value from above)
+			indicator.setConfigJson(configJson);
 			if (metaJson != null) {
 				indicator.setMetaJson(metaJson);
 			}
@@ -4663,41 +4706,107 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			}
 			
 			// Import defaultValueType field
-			if (node.has("default_value_type") && !node.get("default_value_type").isNull()) {
+			if (node.has("defaultValueType") && !node.get("defaultValueType").isNull()) {
 				try {
-					indicator.setDefaultValueType(ReportBuilderIndicator.ValueType.valueOf(node.get("default_value_type")
+					indicator.setDefaultValueType(ReportBuilderIndicator.ValueType.valueOf(node.get("defaultValueType")
 					        .asText()));
 				}
 				catch (IllegalArgumentException e) {
-					log.warn("Invalid default_value_type value: {}", node.get("default_value_type").asText());
+					log.warn("Invalid defaultValueType value: {}", node.get("defaultValueType").asText());
 				}
 			}
 			
 			// Import themeUuid field
-			if (node.has("theme_uuid") && !node.get("theme_uuid").isNull()) {
-				indicator.setThemeUuid(node.get("theme_uuid").asText());
+			if (node.has("themeUuid") && !node.get("themeUuid").isNull()) {
+				indicator.setThemeUuid(node.get("themeUuid").asText());
 			}
 			
 			// Import sqlTemplate field
-			if (node.has("sql_template") && !node.get("sql_template").isNull()) {
-				indicator.setSqlTemplate(node.get("sql_template").asText());
+			if (node.has("sqlTemplate") && !node.get("sqlTemplate").isNull()) {
+				indicator.setSqlTemplate(node.get("sqlTemplate").asText());
 			}
 			
 			// Import denominatorSqlTemplate field
-			if (node.has("denominator_sql_template") && !node.get("denominator_sql_template").isNull()) {
-				indicator.setDenominatorSqlTemplate(node.get("denominator_sql_template").asText());
+			if (node.has("denominatorSqlTemplate") && !node.get("denominatorSqlTemplate").isNull()) {
+				indicator.setDenominatorSqlTemplate(node.get("denominatorSqlTemplate").asText());
 			}
 			
-			dao.saveReportBuilderIndicator(indicator);
-			
-			// Handle retired status after save
-			if (node.has("retired") && node.get("retired").asBoolean()) {
-				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
-					dao.retireReportBuilderIndicator(indicator, node.get("retire_reason").asText());
+			// Handle retired status BEFORE save to avoid Hibernate issues
+			if (node.has("retired")) {
+				indicator.setRetired(node.get("retired").asBoolean());
+				if (node.has("retireReason") && !node.get("retireReason").isNull()) {
+					indicator.setRetireReason(node.get("retireReason").asText());
+				}
+				// Import retiredBy if present (for migration purposes)
+				if (node.has("retiredBy") && !node.get("retiredBy").isNull()) {
+					try {
+						String retiredByUuid = node.get("retiredBy").asText();
+						if (retiredByUuid != null && !retiredByUuid.isEmpty() && !retiredByUuid.equals("null")) {
+							org.openmrs.User retiredBy = Context.getService(org.openmrs.api.UserService.class)
+							        .getUserByUuid(retiredByUuid);
+							if (retiredBy != null) {
+								indicator.setRetiredBy(retiredBy);
+							}
+						}
+					}
+					catch (Exception e) {
+						log.debug("Could not set retiredBy for indicator: {}", e.getMessage());
+					}
+				}
+				// Import dateRetired if present (for migration purposes)
+				if (node.has("dateRetired") && !node.get("dateRetired").isNull()) {
+					try {
+						long dateRetired = node.get("dateRetired").asLong();
+						indicator.setDateRetired(new java.util.Date(dateRetired));
+					}
+					catch (Exception e) {
+						log.debug("Could not set dateRetired for indicator: {}", e.getMessage());
+					}
+				}
+				// If retired but no retiredBy/dateRetired was in import, set to current user/date
+				if (indicator.getRetired() && indicator.getRetiredBy() == null) {
+					indicator.setRetiredBy(org.openmrs.api.context.Context.getAuthenticatedUser());
+					if (indicator.getDateRetired() == null) {
+						indicator.setDateRetired(new java.util.Date());
+					}
+					if (indicator.getRetireReason() == null) {
+						indicator.setRetireReason("Imported as retired");
+					}
 				}
 			}
 			
-			log.debug("Created new indicator: {}", indicator.getName());
+			// Import audit fields if present (for migration purposes)
+			if (node.has("creator") && !node.get("creator").isNull()) {
+				try {
+					String creatorUuid = node.get("creator").asText();
+					if (creatorUuid != null && !creatorUuid.isEmpty() && !creatorUuid.equals("null")) {
+						org.openmrs.User creator = Context.getService(org.openmrs.api.UserService.class).getUserByUuid(
+						    creatorUuid);
+						if (creator != null) {
+							indicator.setCreator(creator);
+						}
+					}
+				}
+				catch (Exception e) {
+					log.debug("Could not set creator for indicator: {}", e.getMessage());
+				}
+			}
+			if (node.has("dateCreated") && !node.get("dateCreated").isNull()) {
+				try {
+					long dateCreated = node.get("dateCreated").asLong();
+					indicator.setDateCreated(new java.util.Date(dateCreated));
+				}
+				catch (Exception e) {
+					log.debug("Could not set dateCreated for indicator: {}", e.getMessage());
+				}
+			}
+			// Set changedBy to current user for new/updated records
+			indicator.setChangedBy(org.openmrs.api.context.Context.getAuthenticatedUser());
+			indicator.setDateChanged(new java.util.Date());
+			
+			saveReportBuilderIndicator(indicator);
+			
+			log.info("[IMPORT] Successfully created indicator: {} ({})", indicator.getName(), file.getName());
 		}
 	}
 	
@@ -4708,12 +4817,12 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
 		
 		String uuid = node.get("uuid").asText();
-		ReportBuilderSection existing = dao.getReportBuilderSectionByUuid(uuid);
+		ReportBuilderSection existing = getReportBuilderSectionByUuid(uuid);
 		
-		// Extract config_json as JSON string
+		// Extract configJson as JSON string (export uses camelCase)
 		String configJson = null;
-		if (node.has("config_json") && !node.get("config_json").isNull()) {
-			configJson = objectMapper.writeValueAsString(node.get("config_json"));
+		if (node.has("configJson") && !node.get("configJson").isNull()) {
+			configJson = objectMapper.writeValueAsString(node.get("configJson"));
 		}
 		
 		if (existing != null) {
@@ -4726,7 +4835,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (configJson != null) {
 				existing.setConfigJson(configJson);
 			}
-			dao.saveReportBuilderSection(existing);
+			saveReportBuilderSection(existing);
 			log.debug("Updated existing section: {}", existing.getName());
 		} else {
 			// Create new
@@ -4740,7 +4849,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (configJson != null) {
 				section.setConfigJson(configJson);
 			}
-			dao.saveReportBuilderSection(section);
+			saveReportBuilderSection(section);
 			log.debug("Created new section: {}", section.getName());
 		}
 	}
@@ -4752,7 +4861,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
 		
 		String uuid = node.get("uuid").asText();
-		ReportBuilderDataTheme existing = dao.getReportBuilderDataThemeByUuid(uuid);
+		ReportBuilderDataTheme existing = getReportBuilderDataThemeByUuid(uuid);
 		
 		// Extract config_json as JSON string
 		String configJson = null;
@@ -4770,7 +4879,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (configJson != null) {
 				existing.setConfigJson(configJson);
 			}
-			dao.saveReportBuilderDataTheme(existing);
+			saveReportBuilderDataTheme(existing);
 			log.debug("Updated existing theme: {}", existing.getName());
 		} else {
 			// Create new
@@ -4784,7 +4893,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (configJson != null) {
 				theme.setConfigJson(configJson);
 			}
-			dao.saveReportBuilderDataTheme(theme);
+			saveReportBuilderDataTheme(theme);
 			log.debug("Created new theme: {}", theme.getName());
 		}
 	}
@@ -4796,7 +4905,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
 		
 		String uuid = node.get("uuid").asText();
-		ReportBuilderAgeCategory existing = dao.getAgeCategoryByUuid(uuid);
+		ReportBuilderAgeCategory existing = getAgeCategoryByUuid(uuid);
 		
 		if (existing != null) {
 			// Update existing
@@ -4805,7 +4914,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				existing.setDescription(node.get("description").asText());
 			}
 			existing.setCode(node.get("code").asText());
-			dao.saveAgeCategory(existing);
+			saveAgeCategory(existing);
 			log.debug("Updated existing age category: {}", existing.getName());
 		} else {
 			// Create new
@@ -4816,7 +4925,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				category.setDescription(node.get("description").asText());
 			}
 			category.setCode(node.get("code").asText());
-			dao.saveAgeCategory(category);
+			saveAgeCategory(category);
 			log.debug("Created new age category: {}", category.getName());
 		}
 	}
@@ -4850,7 +4959,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
 		
 		String uuid = node.get("uuid").asText();
-		ETLSource existing = dao.getETLSourceByUuid(uuid);
+		ETLSource existing = getETLSourceByUuid(uuid);
 		
 		if (existing != null) {
 			// Update existing
@@ -4859,7 +4968,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				existing.setDescription(node.get("description").asText());
 			}
 			existing.setCode(node.get("code").asText());
-			dao.saveETLSource(existing);
+			saveETLSource(existing);
 			log.debug("Updated existing ETL source: {}", existing.getName());
 		} else {
 			// Create new
@@ -4870,7 +4979,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				source.setDescription(node.get("description").asText());
 			}
 			source.setCode(node.get("code").asText());
-			dao.saveETLSource(source);
+			saveETLSource(source);
 			log.debug("Created new ETL source: {}", source.getName());
 		}
 	}
@@ -4882,7 +4991,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
 		
 		String uuid = node.get("uuid").asText();
-		ETLMonitor existing = dao.getETLMonitorByUuid(uuid);
+		ETLMonitor existing = getETLMonitorByUuid(uuid);
 		
 		// Extract config_json and display_config_json as JSON strings
 		String configJson = null;
@@ -4907,7 +5016,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (displayConfigJson != null) {
 				existing.setDisplayConfigJson(displayConfigJson);
 			}
-			dao.saveETLMonitor(existing);
+			saveETLMonitor(existing);
 			log.debug("Updated existing ETL monitor: {}", existing.getName());
 		} else {
 			// Create new
@@ -4924,7 +5033,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (displayConfigJson != null) {
 				monitor.setDisplayConfigJson(displayConfigJson);
 			}
-			dao.saveETLMonitor(monitor);
+			saveETLMonitor(monitor);
 			log.debug("Created new ETL monitor: {}", monitor.getName());
 		}
 	}
@@ -4937,7 +5046,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
 		
 		String uuid = node.get("uuid").asText();
-		ReportBuilderReport existing = dao.getReportBuilderReportByUuid(uuid);
+		ReportBuilderReport existing = getReportBuilderReportByUuid(uuid);
 		
 		// Extract config_json and meta_json as JSON strings
 		String configJson = null;
@@ -4966,7 +5075,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			// Handle category reference via category_uuid
 			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
 				String categoryUuid = node.get("category_uuid").asText();
-				ReportCategory category = dao.getReportCategoryByUuid(categoryUuid);
+				ReportCategory category = getReportCategoryByUuid(categoryUuid);
 				if (category != null) {
 					existing.setCategory(category);
 				}
@@ -5021,7 +5130,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				dao.unretireReportBuilderReport(existing);
 			}
 			
-			dao.saveReportBuilderReport(existing);
+			saveReportBuilderReport(existing);
 			log.debug("Updated existing report: {}", existing.getName());
 		} else {
 			// Create new - all fields
@@ -5047,7 +5156,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			// Handle category reference via category_uuid
 			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
 				String categoryUuid = node.get("category_uuid").asText();
-				ReportCategory category = dao.getReportCategoryByUuid(categoryUuid);
+				ReportCategory category = getReportCategoryByUuid(categoryUuid);
 				if (category != null) {
 					report.setCategory(category);
 				}
@@ -5087,12 +5196,12 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				}
 			}
 			
-			dao.saveReportBuilderReport(report);
+			saveReportBuilderReport(report);
 			
 			// Handle retired status after save
 			if (node.has("retired") && node.get("retired").asBoolean()) {
 				if (node.has("retire_reason") && !node.get("retire_reason").isNull()) {
-					dao.retireReportBuilderReport(report, node.get("retire_reason").asText());
+					retireReportBuilderReport(report, node.get("retire_reason").asText());
 				}
 			}
 			
@@ -5104,9 +5213,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	
 	@Override
 	@Transactional(readOnly = true)
-	public java.util.List<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo> getAvailablePackages(
+	public java.util.List<PackageInfo> getAvailablePackages(
 	        String search, String status, Integer startIndex, Integer limit) {
-		java.util.List<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo> packages = new java.util.ArrayList<>();
+		java.util.List<PackageInfo> packages = new java.util.ArrayList<>();
 
 		try {
 			// Get the packages directory
@@ -5131,7 +5240,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				}
 
 				try {
-					org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo packageInfo = buildPackageInfo(packageDir);
+					PackageInfo packageInfo = buildPackageInfo(packageDir);
 					if (packageInfo != null && matchesFilters(packageInfo, search, status)) {
 						packages.add(packageInfo);
 					}
@@ -5142,10 +5251,10 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			}
 
 			// Sort by exported date descending
-			java.util.Collections.sort(packages, new java.util.Comparator<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo>() {
+			java.util.Collections.sort(packages, new java.util.Comparator<PackageInfo>() {
 				@Override
-				public int compare(org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo p1,
-				        org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo p2) {
+				public int compare(PackageInfo p1,
+				        PackageInfo p2) {
 					if (p1.getExportedAt() == null) return 1;
 					if (p2.getExportedAt() == null) return -1;
 					return p2.getExportedAt().compareTo(p1.getExportedAt());
@@ -5158,7 +5267,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 
 			int end = Math.min(start + maxResults, packages.size());
 			if (start >= packages.size()) {
-				return new java.util.ArrayList<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo>();
+				return new java.util.ArrayList<PackageInfo>();
 			}
 
 			return packages.subList(start, end);
@@ -5193,7 +5302,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				}
 				
 				try {
-					org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo packageInfo = buildPackageInfo(packageDir);
+					PackageInfo packageInfo = buildPackageInfo(packageDir);
 					if (packageInfo != null && matchesFilters(packageInfo, search, status)) {
 						count++;
 					}
@@ -5215,8 +5324,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	/**
 	 * Build PackageInfo from a package directory
 	 */
-	private org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo buildPackageInfo(File packageDir) {
-		org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo packageInfo = new org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo();
+	private PackageInfo buildPackageInfo(File packageDir) {
+		PackageInfo packageInfo = new PackageInfo();
 		packageInfo.setPath(packageDir.getAbsolutePath());
 		packageInfo.setStatus("invalid"); // Default to invalid
 		
@@ -5230,8 +5339,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			}
 			
 			// Parse version.json
-			org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata metadata = objectMapper.readValue(
-			    versionFile, org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.class);
+			VersionMetadata metadata = objectMapper.readValue(
+			    versionFile, VersionMetadata.class);
 			
 			// Extract package info
 			if (metadata.getPackageInfo() != null) {
@@ -5246,8 +5355,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			
 			// Extract dependency counts
 			if (metadata.getContents() != null && metadata.getContents().getDependencies() != null) {
-				org.openmrs.module.reportbuilder.web.controller.dto.PackageDependencySummary summary = new org.openmrs.module.reportbuilder.web.controller.dto.PackageDependencySummary();
-				org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata.DependencyInfo deps = metadata
+				PackageDependencySummary summary = new PackageDependencySummary();
+				VersionMetadata.DependencyInfo deps = metadata
 				        .getContents().getDependencies();
 				
 				summary.setCategories(deps.getCategories() != null ? deps.getCategories().size() : 0);
@@ -5283,7 +5392,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * Validate package structure
 	 */
 	private boolean validatePackageStructure(File packageDir,
-	        org.openmrs.module.reportbuilder.web.controller.dto.VersionMetadata metadata) {
+	        VersionMetadata metadata) {
 		// Must have valid metadata with name and version
 		if (metadata.getPackageInfo() == null) {
 			return false;
@@ -5334,7 +5443,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	/**
 	 * Check if package matches the given filters
 	 */
-	private boolean matchesFilters(org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo packageInfo,
+	private boolean matchesFilters(PackageInfo packageInfo,
 	        String search, String status) {
 		// Filter by search term
 		if (search != null && !search.trim().isEmpty()) {
