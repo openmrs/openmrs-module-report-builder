@@ -17,9 +17,11 @@ public class ShippingResult {
     private ShippingDependencies dependencies;
     private String versionFile;
     private String errorMessage;
+    private List<String> compiledReports;
 
     public ShippingResult() {
         this.dependencies = new ShippingDependencies();
+        this.compiledReports = new ArrayList<>();
     }
 
     public boolean isSuccess() {
@@ -84,6 +86,14 @@ public class ShippingResult {
 
     public void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
+    }
+
+    public List<String> getCompiledReports() {
+        return compiledReports;
+    }
+
+    public void setCompiledReports(List<String> compiledReports) {
+        this.compiledReports = compiledReports;
     }
 
     /**

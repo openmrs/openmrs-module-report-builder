@@ -1,5 +1,10 @@
 package org.openmrs.module.reportbuilder.model;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import org.openmrs.module.reportbuilder.api.export.AgeCategoryUuidDeserializer;
+import org.openmrs.module.reportbuilder.api.export.AgeCategoryUuidSerializer;
+
 import javax.persistence.*;
 
 /**
@@ -21,6 +26,8 @@ public class ReportBuilderAgeGroup {
 	
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
 	@JoinColumn(name = "age_category_id", nullable = false)
+	@JsonSerialize(using = AgeCategoryUuidSerializer.class)
+	@JsonDeserialize(using = AgeCategoryUuidDeserializer.class)
 	private ReportBuilderAgeCategory ageCategory;
 	
 	@Column(name = "code", length = 50)

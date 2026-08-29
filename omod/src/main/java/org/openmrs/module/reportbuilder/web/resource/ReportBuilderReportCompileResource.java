@@ -39,7 +39,10 @@ public class ReportBuilderReportCompileResource extends DelegatingCrudResource<R
 		}
 		
 		ReportBuilderService ReportBuilderService = Context.getService(ReportBuilderService.class);
-		ReportBuilderService.CompiledReportArtifacts result = ReportBuilderService.compileReport(delegate.getReportUuid());
+		
+		// Use the service method to compile and optionally add to library
+		ReportBuilderService.CompiledReportArtifacts result = ReportBuilderService.compileAndAddToLibrary(
+		    delegate.getReportUuid(), delegate.getCategory());
 		
 		ReportDefinition rd = result.getReportDefinition();
 		
@@ -53,22 +56,10 @@ public class ReportBuilderReportCompileResource extends DelegatingCrudResource<R
 		// Include compiled config (with parameters) for frontend theme config creation
 		out.setCompiledJson(result.getCompiledJson());
 		
-		// If category is provided, automatically add to report library using the category UUID
+		// Check if report library entry was created/updated by the service
 		if (delegate.getCategory() != null && !delegate.getCategory().trim().isEmpty() && rd != null) {
 			try {
-				// Frontend sends category UUID - look up by UUID (not name)
-				String categoryUuid = delegate.getCategory().trim();
-				ReportCategory category = ReportBuilderService.getReportCategoryByUuid(categoryUuid);
-				
-				if (category == null) {
-					// Only log warning if category not found - don't create a new one
-					// The category should already exist in the system
-					System.err.println("Category not found with UUID: " + categoryUuid);
-					out.setAddedToLibrary(Boolean.FALSE);
-					return out;
-				}
-				
-				// Check if report library entry already exists for this report definition
+				// Look for the report library entry that was created/updated
 				ReportLibrary existingEntry = null;
 				for (ReportLibrary rl : ReportBuilderService.getReportLibraries(null, false, 0, null)) {
 					if (rd.getUuid().equals(rl.getReportDefinitionUuid())) {
@@ -78,52 +69,13 @@ public class ReportBuilderReportCompileResource extends DelegatingCrudResource<R
 				}
 				
 				if (existingEntry != null) {
-					// Update existing entry with latest report metadata
-					existingEntry.setCategory(category);
-					existingEntry.setName(rd.getName());
-					existingEntry.setDescription(rd.getDescription());
-					existingEntry.setReportDefinitionUuid(rd.getUuid());
-					existingEntry.setReportBuilderReportUuid(result.getReportBuilderReport() != null ? result
-					        .getReportBuilderReport().getUuid() : null);
-					if (result.getReportBuilderReport() != null) {
-						existingEntry.setReportType(result.getReportBuilderReport().getReportType());
-					}
-					// Ensure sourceType remains BUILDER for compiled reports
-					existingEntry.setSourceType(ReportLibrary.ReportSourceType.BUILDER);
-					// Update parameters in metaJson for frontend UI rendering
-					if (result.getCompiledJson() != null) {
-						existingEntry.setMetaJson(extractParametersMetaJson(result.getCompiledJson()));
-					}
-					ReportBuilderService.saveReportLibrary(existingEntry);
 					out.setAddedToLibrary(Boolean.TRUE);
 					out.setReportLibraryUuid(existingEntry.getUuid());
 				} else {
-					// Create new report library entry
-					ReportLibrary reportLibrary = new ReportLibrary();
-					reportLibrary.setReportDefinitionUuid(rd.getUuid());
-					reportLibrary.setName(rd.getName());
-					reportLibrary.setDescription(rd.getDescription());
-					reportLibrary.setCategory(category);
-					reportLibrary.setSourceType(ReportLibrary.ReportSourceType.BUILDER);
-					reportLibrary.setReportBuilderReportUuid(result.getReportBuilderReport() != null ? result
-					        .getReportBuilderReport().getUuid() : null);
-					reportLibrary.setReportType(result.getReportBuilderReport() != null ? result.getReportBuilderReport()
-					        .getReportType()
-					        : org.openmrs.module.reportbuilder.model.ReportBuilderReport.ReportType.AGGREGATE);
-					reportLibrary.setMigrated(Boolean.FALSE);
-					
-					// Store parameters in metaJson for frontend UI rendering
-					if (result.getCompiledJson() != null) {
-						reportLibrary.setMetaJson(extractParametersMetaJson(result.getCompiledJson()));
-					}
-					
-					ReportLibrary saved = ReportBuilderService.saveReportLibrary(reportLibrary);
-					out.setAddedToLibrary(Boolean.TRUE);
-					out.setReportLibraryUuid(saved.getUuid());
+					out.setAddedToLibrary(Boolean.FALSE);
 				}
 			}
 			catch (Exception e) {
-				// Log error but don't fail the compilation
 				out.setAddedToLibrary(Boolean.FALSE);
 			}
 		}

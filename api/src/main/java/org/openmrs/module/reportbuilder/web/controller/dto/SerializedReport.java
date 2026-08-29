@@ -16,6 +16,7 @@ public class SerializedReport {
     private String code;
     private String version;
     private String category;
+    private String categoryUuid;
     private String subcategory;
     private String reportType;
     private String status;
@@ -96,6 +97,14 @@ public class SerializedReport {
         this.category = category;
     }
 
+    public String getCategoryUuid() {
+        return categoryUuid;
+    }
+
+    public void setCategoryUuid(String categoryUuid) {
+        this.categoryUuid = categoryUuid;
+    }
+
     public String getSubcategory() {
         return subcategory;
     }
@@ -165,6 +174,7 @@ public class SerializedReport {
         private java.util.List<String> ageGroups = new java.util.ArrayList<>();
         private String dataSource;
         private java.util.List<String> etlMonitors = new java.util.ArrayList<>();
+        private java.util.List<String> libraries = new java.util.ArrayList<>();
 
         public java.util.List<String> getIndicators() {
             return indicators;
@@ -244,6 +254,18 @@ public class SerializedReport {
 
         public void addETLMonitor(String etlMonitor) {
             this.etlMonitors.add(etlMonitor);
+        }
+
+        public java.util.List<String> getLibraries() {
+            return libraries;
+        }
+
+        public void setLibraries(java.util.List<String> libraries) {
+            this.libraries = libraries;
+        }
+
+        public void addLibrary(String library) {
+            this.libraries.add(library);
         }
     }
 }

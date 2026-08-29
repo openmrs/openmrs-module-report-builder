@@ -151,6 +151,10 @@ public class ReportBuilderReport extends BaseOpenmrsMetadata implements Serializ
 			if (value == null || value.trim().isEmpty()) {
 				return AGGREGATE;
 			}
+			String normalized = value.trim().toUpperCase().replace("_", "");
+			if ("LINELIST".equals(normalized)) {
+				return LINE_LIST;
+			}
 			try {
 				return ReportType.valueOf(value.trim().toUpperCase());
 			}

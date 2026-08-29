@@ -15,11 +15,21 @@ import java.util.Date;
  */
 public class LineListDataSetDefinition extends BaseDataSetDefinition {
 	
+	/** Legacy root under the application data directory, honoring the global property override. */
 	public static final String REPORTS_PATH = "configuration/reportbuilder";
 	
 	public static final String GP_TO_DIR_PATH = "reportbuilder.reports.directory";
 	
+	/** Legacy designs folder name kept for backward-compatible reads of pre-existing installs. */
 	public static final String REPORT_DESIGNS_FOLDER = "report_designs";
+	
+	/**
+	 * Canonical store for compiled design files: &lt;OPENMRS_APPDATA&gt;/configuration/reports with
+	 * type subfolders aggregates/ and linelist/.
+	 */
+	public static final String CONFIGURATION_FOLDER = "configuration";
+	
+	public static final String CANONICAL_REPORTS_FOLDER = "reports";
 	
 	@ConfigurationProperty
 	private Date startDate;
@@ -62,8 +72,8 @@ public class LineListDataSetDefinition extends BaseDataSetDefinition {
 	
 	/**
 	 * Returns the resolved report design file. Rules: - null &gt; null - absolute path &gt; return
-	 * as-is - relative path &gt; resolve under the configured reportbuilder report designs
-	 * directory
+	 * as-is - relative path &gt; resolve under the canonical configuration/reports directory,
+	 * falling back to the legacy report designs directory when the file only exists there.
 	 */
 	public File getReportDesign() {
 		if (reportDesign == null) {
@@ -74,7 +84,14 @@ public class LineListDataSetDefinition extends BaseDataSetDefinition {
 			return reportDesign;
 		}
 		
-		return new File(getReportDesignDirectory(), reportDesign.getPath());
+		File resolved = new File(getReportDesignDirectory(), reportDesign.getPath());
+		if (!resolved.exists()) {
+			File legacy = new File(getLegacyReportDesignDirectory(), reportDesign.getPath());
+			if (legacy.exists()) {
+				return legacy;
+			}
+		}
+		return resolved;
 	}
 	
 	/**
@@ -104,11 +121,29 @@ public class LineListDataSetDefinition extends BaseDataSetDefinition {
 	}
 	
 	/**
-	 * Returns the report designs directory under the configured reportbuilder root. If the global
-	 * property reportbuilder.reports.directory is not set, the fallback path is:
-	 * &lt;OPENMRS_APPDATA&gt;/configuration/reportbuilder/report_designs
+	 * Returns the canonical directory holding compiled design files:
+	 * &lt;OPENMRS_APPDATA&gt;/configuration/reports (type subfolders aggregates/ and linelist/ are
+	 * part of the stored relative paths). Created on first access.
 	 */
 	public static File getReportDesignDirectory() {
+		File dir = new File(new File(OpenmrsUtil.getApplicationDataDirectory(), CONFIGURATION_FOLDER),
+		        CANONICAL_REPORTS_FOLDER);
+		
+		if (!dir.exists() && !dir.mkdirs()) {
+			throw new RuntimeException("Failed to create report design directory: " + dir.getAbsolutePath());
+		}
+		
+		return dir;
+	}
+	
+	/**
+	 * Returns the legacy designs directory
+	 * (&lt;OPENMRS_APPDATA&gt;/&lt;reportbuilder.reports.directory GP, default
+	 * configuration/reportbuilder&gt;/report_designs) honoring any global property override. Kept
+	 * solely so previously compiled reports keep evaluating before they are recompiled into the
+	 * canonical location.
+	 */
+	public static File getLegacyReportDesignDirectory() {
 		AdministrationService administrationService = Context.getAdministrationService();
 		String pathToDIR = administrationService.getGlobalProperty(GP_TO_DIR_PATH);
 		
@@ -116,13 +151,7 @@ public class LineListDataSetDefinition extends BaseDataSetDefinition {
 			pathToDIR = REPORTS_PATH;
 		}
 		
-		File dir = new File(new File(OpenmrsUtil.getApplicationDataDirectory(), pathToDIR), REPORT_DESIGNS_FOLDER);
-		
-		if (!dir.exists() && !dir.mkdirs()) {
-			throw new RuntimeException("Failed to create report design directory: " + dir.getAbsolutePath());
-		}
-		
-		return dir;
+		return new File(new File(OpenmrsUtil.getApplicationDataDirectory(), pathToDIR), REPORT_DESIGNS_FOLDER);
 	}
 	
 	/**

@@ -140,11 +140,11 @@ public class ImportExportDtoSimpleTest {
 	public void shouldSetShippingRequestProperties() {
 		ShippingRequest request = new ShippingRequest();
 		
-		request.setReportUuid("report-uuid-123");
+		request.setType("compiledReports");
 		request.setVersion("2.0.0");
 		request.setDestination("/path/to/export");
 		
-		Assert.assertEquals("Report UUID should match", "report-uuid-123", request.getReportUuid());
+		Assert.assertEquals("Type should match", "compiledReports", request.getType());
 		Assert.assertEquals("Version should match", "2.0.0", request.getVersion());
 		Assert.assertEquals("Destination should match", "/path/to/export", request.getDestination());
 	}

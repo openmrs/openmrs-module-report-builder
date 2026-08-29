@@ -46,7 +46,10 @@
 		<property>reportbuilder.reports.directory</property>
 		<defaultValue>configuration/reportbuilder</defaultValue>
 		<description>
-			The path to the working directory of the report builder
+			LEGACY (read-only fallback). Previously the root for compiled report design files.
+			New compiles are stored under &lt;app data dir&gt;/configuration/reports/{aggregates,linelist}.
+			This property is only consulted to resolve designs compiled before the move, until they
+			are recompiled.
 		</description>
 	</globalProperty>
 

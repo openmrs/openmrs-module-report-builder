@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -82,36 +83,124 @@ public class ReportShippingResource extends DelegatingCrudResource<ShippingResul
 	}
 	
 	/**
-	 * POST handler for shipping a single report. Expected request body: { "reportUuid":
-	 * "uuid-here", "version": "1.0.0", "destination": "/optional/path" // defaults to OpenMRS
-	 * config dir }
+	 * POST handler for shipping/exporting reports based on type. Simple type-based routing:
+	 * <p>
+	 * 1. Export all compiled reports: { "type": "compiledReports", "destination": "/optional/path",
+	 * "version": "1.0.0" }
+	 * </p>
+	 * <p>
+	 * 2. Export all artifacts with dependencies: { "type": "artifacts", "destination":
+	 * "/optional/path", "version": "1.0.0" }
+	 * </p>
 	 * 
 	 * @param shippingRequest The shipping request
 	 * @param context The request context
-	 * @return SimpleObject with success status and ShippingResult data
+	 * @return SimpleObject with success status and export data
 	 */
 	public Object post(Object shippingRequest, RequestContext context) throws ResponseException {
 		try {
-			// Log incoming request for debugging
-			log.debug("Received shipping request: {}", shippingRequest);
-			log.debug("Request type: {}", shippingRequest != null ? shippingRequest.getClass().getName() : "null");
-			
 			// Convert request to ShippingRequest
 			ShippingRequest request;
 			if (shippingRequest instanceof ShippingRequest) {
 				request = (ShippingRequest) shippingRequest;
 			} else if (shippingRequest instanceof SimpleObject) {
-				SimpleObject simpleObj = (SimpleObject) shippingRequest;
-				log.debug("SimpleObject contents: {}", simpleObj);
-				request = convertToShippingRequest(simpleObj);
-				log.debug("Converted request - reportUuid: {}, version: {}, destination: {}",
-				    new Object[] { request.getReportUuid(), request.getVersion(), request.getDestination() });
+				request = convertToShippingRequest((SimpleObject) shippingRequest);
 			} else {
-				log.error("Invalid request format: {}", shippingRequest != null ? shippingRequest.getClass().getName()
-				        : "null");
 				throw new IllegalArgumentException("Invalid request format");
 			}
 			
+			// Determine export type (default to artifacts)
+			String type = request.getType();
+			if (type == null || type.trim().isEmpty()) {
+				type = "artifacts";
+			}
+			
+			log.info("Processing export request with type: {}", type);
+			
+			// Route based on type
+			if ("compiledReports".equalsIgnoreCase(type)) {
+				return exportAllCompiledReports(request);
+			} else if ("artifacts".equalsIgnoreCase(type)) {
+				return exportAllArtifacts(request);
+			} else {
+				throw new IllegalArgumentException("Invalid export type: " + type
+				        + ". Must be 'compiledReports' or 'artifacts'");
+			}
+			
+		}
+		catch (Exception e) {
+			throw new IllegalArgumentException("Failed to export reports: " + e.getMessage(), e);
+		}
+	}
+	
+	/**
+	 * Export all compiled reports
+	 */
+	private Object exportAllCompiledReports(ShippingRequest request) {
+		try {
+			// Determine destination directory
+			File destination;
+			if (request.getDestination() != null && !request.getDestination().trim().isEmpty()) {
+				destination = new File(request.getDestination());
+			} else {
+				destination = getShippingService().getDefaultShippingDirectory();
+			}
+			
+			// Auto-generate version if not provided
+			String version = request.getVersion();
+			if (version == null || version.trim().isEmpty()) {
+				version = generateVersion();
+				log.debug("Auto-generated version: {}", version);
+			}
+			
+			log.info("Exporting all compiled reports to: {} with version: {}", destination.getAbsolutePath(), version);
+			
+			// Get all reports and export each as compiled report
+			List<org.openmrs.module.reportbuilder.model.ReportBuilderReport> reports = getShippingService()
+			        .getReportBuilderReports(null, false, null, null);
+			
+			int successCount = 0;
+			int errorCount = 0;
+			List<String> exportedFiles = new ArrayList<String>();
+			
+			for (org.openmrs.module.reportbuilder.model.ReportBuilderReport report : reports) {
+				try {
+					File exportedFile = getShippingService().exportCompiledReport(report.getUuid(), destination);
+					exportedFiles.add(exportedFile.getAbsolutePath());
+					successCount++;
+					log.debug("Exported compiled report: {} to {}", report.getName(), exportedFile.getName());
+				}
+				catch (Exception e) {
+					errorCount++;
+					log.error("Failed to export compiled report: {}", report.getName(), e);
+				}
+			}
+			
+			// Build response
+			SimpleObject response = new SimpleObject();
+			response.put("success", errorCount == 0);
+			response.put("message", String.format("Exported %d compiled reports, %d failed", successCount, errorCount));
+			response.put("version", version);
+			response.put("destination", destination.getAbsolutePath());
+			response.put("exportedFiles", exportedFiles);
+			response.put("successCount", successCount);
+			response.put("errorCount", errorCount);
+			
+			return response;
+		}
+		catch (Exception e) {
+			SimpleObject response = new SimpleObject();
+			response.put("success", false);
+			response.put("message", "Failed to export compiled reports: " + e.getMessage());
+			return response;
+		}
+	}
+	
+	/**
+	 * Export all artifacts with dependencies (existing bulk functionality)
+	 */
+	private Object exportAllArtifacts(ShippingRequest request) {
+		try {
 			// Determine destination directory
 			File destination;
 			if (request.getDestination() != null && !request.getDestination().trim().isEmpty()) {
@@ -140,10 +229,12 @@ public class ReportShippingResource extends DelegatingCrudResource<ShippingResul
 			response.put("data", resultToSimpleObject(result));
 			
 			return response;
-			
 		}
 		catch (Exception e) {
-			throw new IllegalArgumentException("Failed to extract artifacts: " + e.getMessage(), e);
+			SimpleObject response = new SimpleObject();
+			response.put("success", false);
+			response.put("message", "Failed to export artifacts: " + e.getMessage());
+			return response;
 		}
 	}
 	
@@ -152,9 +243,9 @@ public class ReportShippingResource extends DelegatingCrudResource<ShippingResul
 	 */
 	private ShippingRequest convertToShippingRequest(SimpleObject obj) {
 		ShippingRequest request = new ShippingRequest();
-		request.setReportUuid((String) obj.get("reportUuid"));
 		request.setVersion((String) obj.get("version"));
 		request.setDestination((String) obj.get("destination"));
+		request.setType((String) obj.get("type"));
 		return request;
 	}
 	

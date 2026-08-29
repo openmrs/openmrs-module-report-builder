@@ -44,6 +44,8 @@ public class LegacyGenericReportSchema {
 		// Categorization fields (flat structure)
 		private String category;
 		
+		private String categoryUuid;
+		
 		private String subcategory;
 		
 		private String reportType;
@@ -51,6 +53,48 @@ public class LegacyGenericReportSchema {
 		private String reportYear;
 		
 		private String reportScope;
+		
+		/**
+		 * Cross-instance linkage carried by shipped compiled designs. Populated at compile time so
+		 * a package can recreate or update the matching ReportLibrary entry on import.
+		 */
+		private String reportBuilderReportUuid;
+		
+		private String reportDefinitionUuid;
+		
+		private String reportLibraryUuid;
+		
+		public String getCategoryUuid() {
+			return categoryUuid;
+		}
+		
+		public void setCategoryUuid(String categoryUuid) {
+			this.categoryUuid = categoryUuid;
+		}
+		
+		public String getReportBuilderReportUuid() {
+			return reportBuilderReportUuid;
+		}
+		
+		public void setReportBuilderReportUuid(String reportBuilderReportUuid) {
+			this.reportBuilderReportUuid = reportBuilderReportUuid;
+		}
+		
+		public String getReportDefinitionUuid() {
+			return reportDefinitionUuid;
+		}
+		
+		public void setReportDefinitionUuid(String reportDefinitionUuid) {
+			this.reportDefinitionUuid = reportDefinitionUuid;
+		}
+		
+		public String getReportLibraryUuid() {
+			return reportLibraryUuid;
+		}
+		
+		public void setReportLibraryUuid(String reportLibraryUuid) {
+			this.reportLibraryUuid = reportLibraryUuid;
+		}
 		
 		// Getters and setters
 		public String getVersion() {

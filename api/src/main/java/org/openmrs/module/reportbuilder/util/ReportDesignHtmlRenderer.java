@@ -185,7 +185,7 @@ public class ReportDesignHtmlRenderer {
 				
 				if (hasAnyTotal(rows)) {
 					if (Boolean.TRUE.equals(row.showTotal)) {
-						Integer total = resolveTotalValue(values, row, defaultValue);
+						Integer total = resolveTotalValue(values, row, null, defaultValue);
 						sb.append("<td class='val'>").append(total).append("</td>");
 					} else {
 						sb.append("<td class='val'></td>");
@@ -193,9 +193,9 @@ public class ReportDesignHtmlRenderer {
 				}
 			} else {
 				for (DimCombo combo : rowCombos) {
-					String key = buildKeyFlexible(safe(row.keyPattern, "{code}_{age}_{sex}"), safe(row.code),
+					String key = buildKeyFlexible(safe(row.keyPattern, "{code}_{age}_{sex}"), sanitizeCode(row.code),
 					    combo.placeholders);
-					Integer v = coerceToInt(values.get(key));
+					Integer v = coerceToInt(lookupValue(values, key));
 					if (v == null) {
 						v = defaultValue;
 					}
@@ -204,7 +204,7 @@ public class ReportDesignHtmlRenderer {
 				
 				if (hasAnyTotal(rows)) {
 					if (Boolean.TRUE.equals(row.showTotal)) {
-						Integer total = resolveTotalValue(values, row, defaultValue);
+						Integer total = resolveTotalValue(values, row, rowCombos, defaultValue);
 						sb.append("<td class='val'>").append(total).append("</td>");
 					} else {
 						sb.append("<td class='val'></td>");
@@ -245,25 +245,54 @@ public class ReportDesignHtmlRenderer {
 	}
 	
 	private Integer resolveSingleValue(Map<String, Object> values, Row row, int defaultValue) {
-		String code = safe(row.code);
-		Integer v = coerceToInt(values.get(code));
+		String code = sanitizeCode(row.code);
+		Integer v = coerceToInt(lookupValue(values, code));
 		if (v != null) {
 			return v;
 		}
 		
 		String totalKey = buildTotalKey(row);
-		v = coerceToInt(values.get(totalKey));
+		v = coerceToInt(lookupValue(values, totalKey));
 		return v == null ? defaultValue : v;
 	}
 	
-	private Integer resolveTotalValue(Map<String, Object> values, Row row, int defaultValue) {
+	private Integer resolveTotalValue(Map<String, Object> values, Row row, List<DimCombo> combos, int defaultValue) {
 		String totalKey = buildTotalKey(row);
-		Integer v = coerceToInt(values.get(totalKey));
-		return v == null ? defaultValue : v;
+		Integer v = coerceToInt(lookupValue(values, totalKey));
+		if (v != null) {
+			return v;
+		}
+		return sumComboValues(values, row, combos, defaultValue);
+	}
+	
+	/**
+	 * Falls the row total back to the sum of its disaggregation cells when the data carries no
+	 * explicit total placeholder - disaggregated indicators only emit per-cell columns, so without
+	 * this the Total column renders the default while the cells show values.
+	 */
+	private Integer sumComboValues(Map<String, Object> values, Row row, List<DimCombo> combos, int defaultValue) {
+		if (combos == null || combos.isEmpty()) {
+			return Integer.valueOf(defaultValue);
+		}
+		
+		int sum = 0;
+		boolean any = false;
+		
+		for (DimCombo combo : combos) {
+			String key = buildKeyFlexible(safe(row.keyPattern, "{code}_{age}_{sex}"), sanitizeCode(row.code),
+			    combo.placeholders);
+			Integer v = coerceToInt(lookupValue(values, key));
+			if (v != null) {
+				sum += v;
+				any = true;
+			}
+		}
+		
+		return Integer.valueOf(any ? sum : defaultValue);
 	}
 	
 	private String buildTotalKey(Row row) {
-		String code = safe(row.code);
+		String code = sanitizeCode(row.code);
 		String keyPattern = safe(row.keyPattern);
 		
 		if (keyPattern.contains("{code}") && !keyPattern.contains("{age}") && !keyPattern.contains("{sex}")) {
@@ -275,6 +304,19 @@ public class ReportDesignHtmlRenderer {
 		}
 		
 		return code + "_TOTAL";
+	}
+	
+	/**
+	 * Normalizes an indicator code to the spelling used in data placeholders. The compile side
+	 * sanitizes codes when building placeholder keys (non-alphanumeric runs collapse to
+	 * underscores, leading/trailing separators drop), so a template code authored as "HT01a." must
+	 * be spelled "HT01a" when building lookup keys - otherwise the raw code produces keys like
+	 * "HT01a._Y20P_F" that no data column matches.
+	 */
+	private String sanitizeCode(String code) {
+		String out = safe(code).replace("+", "plus").replace("<", "lt").replace(">", "gt");
+		out = out.replaceAll("[^A-Za-z0-9]+", "_").replaceAll("_+", "_").replaceAll("^_", "").replaceAll("_$", "");
+		return out;
 	}
 	
 	private void appendHeaderCellsRecursive(StringBuilder sb, List<ResolvedDim> dims, int headerRow) {
@@ -400,9 +442,9 @@ public class ReportDesignHtmlRenderer {
 				
 				if (!Boolean.TRUE.equals(row.showDisaggregation) || combos.isEmpty()) {
 					String key = buildTotalKey(row);
-					Integer v = coerceToInt(values.get(key));
+					Integer v = coerceToInt(lookupValue(values, key));
 					if (v == null) {
-						v = coerceToInt(values.get(row.code));
+						v = coerceToInt(lookupValue(values, row.code));
 					}
 					if (v == null) {
 						v = defaultValue;
@@ -427,10 +469,10 @@ public class ReportDesignHtmlRenderer {
 				}
 				
 				for (DimCombo combo : combos) {
-					String computedKey = buildKeyFlexible(safe(row.keyPattern, "{code}_{age}_{sex}"), safe(row.code),
-					    combo.placeholders);
+					String computedKey = buildKeyFlexible(safe(row.keyPattern, "{code}_{age}_{sex}"),
+					    sanitizeCode(row.code), combo.placeholders);
 					
-					Integer v = coerceToInt(values.get(computedKey));
+					Integer v = coerceToInt(lookupValue(values, computedKey));
 					if (v == null) {
 						v = defaultValue;
 					}
@@ -455,10 +497,7 @@ public class ReportDesignHtmlRenderer {
 				
 				if (Boolean.TRUE.equals(row.showTotal)) {
 					String totalKey = buildTotalKey(row);
-					Integer total = coerceToInt(values.get(totalKey));
-					if (total == null) {
-						total = defaultValue;
-					}
+					Integer total = resolveTotalValue(values, row, combos, defaultValue);
 					
 					ObjectNode dv = MAPPER.createObjectNode();
 					dv.put("value", total);
@@ -624,6 +663,81 @@ public class ReportDesignHtmlRenderer {
 		catch (Exception ignore) {
 			return null;
 		}
+	}
+	
+	/**
+	 * Resolves the value for a compiled placeholder key, falling back to the alternative spellings
+	 * the runtime may have produced. Compile-time sanitize() spells "+" as "plus" and "<"/">" as
+	 * "lt"/"gt" inside design placeholder keys, while the runtime column keys built by
+	 * AggregateDataSetEvaluator.sanitizeKey strip those characters - so the design key
+	 * HT01a_20yrsplus_F may be stored as HT01a_20yrs_F, or lt10_yrs as 10_yrs. Exact matches always
+	 * win; variants are tried only after the exact key misses.
+	 */
+	private Object lookupValue(Map<String, Object> values, String key) {
+		if (values == null || key == null) {
+			return null;
+		}
+		
+		Object v = values.get(key);
+		if (v != null) {
+			return v;
+		}
+		
+		if (key.indexOf('_') < 0) {
+			return null;
+		}
+		
+		String stripped = swapSanitizeMarkers(key, true);
+		if (stripped != null) {
+			v = values.get(stripped);
+			if (v != null) {
+				return v;
+			}
+		}
+		
+		String raw = swapSanitizeMarkers(key, false);
+		if (raw != null) {
+			v = values.get(raw);
+		}
+		return v;
+	}
+	
+	/**
+	 * Rewrites the sanitize()-introduced markers in a key's segments: toStripped=true turns
+	 * "20yrsplus" into "20yrs" and "lt10"/"gt60" into "10"/"60" (the evaluator spelling);
+	 * toStripped=false turns them into "20yrs+"/"&lt;10"/"&gt;60" (the raw-character spelling used
+	 * by unsanitized keys). Returns null when no segment carries a marker, i.e. there is no
+	 * alternative spelling to try.
+	 */
+	private String swapSanitizeMarkers(String key, boolean toStripped) {
+		String[] segments = key.split("_", -1);
+		StringBuilder sb = new StringBuilder();
+		boolean changed = false;
+		
+		for (int i = 0; i < segments.length; i++) {
+			if (i > 0) {
+				sb.append('_');
+			}
+			
+			String s = segments[i];
+			String swapped;
+			if (s.endsWith("plus") && s.length() > 4) {
+				swapped = s.substring(0, s.length() - 4) + (toStripped ? "" : "+");
+			} else if (s.startsWith("lt") && s.length() > 2 && Character.isDigit(s.charAt(2))) {
+				swapped = (toStripped ? "" : "<") + s.substring(2);
+			} else if (s.startsWith("gt") && s.length() > 2 && Character.isDigit(s.charAt(2))) {
+				swapped = (toStripped ? "" : ">") + s.substring(2);
+			} else {
+				swapped = s;
+			}
+			
+			if (!swapped.equals(s)) {
+				changed = true;
+			}
+			sb.append(swapped);
+		}
+		
+		return changed ? sb.toString() : null;
 	}
 	
 	private String safe(String value) {

@@ -157,7 +157,7 @@ public class ReportBuilderAgeGroupResource extends DelegatingCrudResource<Report
 			d.addProperty("maxAgeDays");
 			d.addProperty("sortOrder");
 			d.addProperty("active");
-			d.addProperty("ageCategory", Representation.DEFAULT);
+			d.addProperty("ageCategory", Representation.REF);
 			return d;
 		}
 		

@@ -21,7 +21,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Handler(supports = { AggregateReportDataSetDefinition.class })
 public class AggregateDataSetEvaluator implements DataSetEvaluator {
@@ -72,8 +74,12 @@ public class AggregateDataSetEvaluator implements DataSetEvaluator {
 		try {
 			JsonNode rootNode = objectMapper.readTree(file);
 			
+			// Label -> code map from the live age group dimension, used to keep value matching
+			// aligned when age group labels are renamed after a report was compiled.
+			Map<String, String> ageGroupCodeByLabel = resolveAgeGroupCodeByLabel(evaluationContext);
+			
 			if (rootNode.has("report_fields") && rootNode.path("report_fields").isArray()) {
-				return evaluateLegacyReport(rootNode, evaluationContext, row, startDate, endDate);
+				return evaluateLegacyReport(rootNode, evaluationContext, row, startDate, endDate, ageGroupCodeByLabel);
 			}
 			
 			if (rootNode.has("indicators") && rootNode.path("indicators").isArray()) {
@@ -98,7 +104,7 @@ public class AggregateDataSetEvaluator implements DataSetEvaluator {
 	}
 	
 	private DataSetRow evaluateLegacyReport(JsonNode rootNode, EvaluationContext evaluationContext, DataSetRow row,
-	        String startDate, String endDate) {
+	        String startDate, String endDate, Map<String, String> ageGroupCodeByLabel) {
 		
 		JsonNode reportFieldsArray = rootNode.path("report_fields");
 		
@@ -130,7 +136,7 @@ public class AggregateDataSetEvaluator implements DataSetEvaluator {
 				
 				if (reportField.has("values")) {
 					List<ValueHolder> convertedResults = convertToValueHolderList(results);
-					row = placesValuesToDataSetRow(reportField, convertedResults, row);
+					row = placesValuesToDataSetRow(reportField, convertedResults, row, ageGroupCodeByLabel);
 				} else if (reportField.has("value_place_holder")) {
 					ValueHolder convertedResult = null;
 					if (results != null && !results.isEmpty()) {
@@ -336,12 +342,14 @@ public class AggregateDataSetEvaluator implements DataSetEvaluator {
 		return (a == null ? "" : a).equals(b == null ? "" : b);
 	}
 	
-	private static DataSetRow placesValuesToDataSetRow(JsonNode reportField, List<ValueHolder> values, DataSetRow row) {
+	static DataSetRow placesValuesToDataSetRow(JsonNode reportField, List<ValueHolder> values, DataSetRow row,
+	        Map<String, String> ageGroupCodeByLabel) {
 		JsonNode valuesArray = reportField.path("values");
 		PatientDataHelper pdh = new PatientDataHelper();
 		
 		for (JsonNode valueObject : valuesArray) {
 			String dissaggregations1 = valueObject.path("dissaggregations1").asText();
+			String disaggCode = valueObject.path("disaggregation_code").asText(null);
 			String dissaggregations2 = valueObject.path("dissaggregations2").asText();
 			String valuePlaceHolder = valueObject.path("value_place_holder").asText();
 			
@@ -350,7 +358,8 @@ public class AggregateDataSetEvaluator implements DataSetEvaluator {
 				int i;
 				for (i = 0; i < values.size(); i++) {
 					ValueHolder v = values.get(i);
-					if (safeEquals(v.getDisag1(), dissaggregations1) && safeEquals(v.getDisag2(), dissaggregations2)) {
+					if (ageDisaggMatches(v, dissaggregations1, disaggCode, ageGroupCodeByLabel)
+					        && safeEquals(v.getDisag2(), dissaggregations2)) {
 						valueHolder = v;
 						break;
 					}
@@ -366,6 +375,64 @@ public class AggregateDataSetEvaluator implements DataSetEvaluator {
 		}
 		
 		return row;
+	}
+	
+	/**
+	 * A SQL disaggregation row matches a design value entry when the age value equals the compiled
+	 * label, or - for designs carrying a {@code disaggregation_code} stamp - when the label
+	 * resolves, via the live age group dimension, to that code. The code path keeps values aligned
+	 * when age group labels are renamed after the report was compiled.
+	 */
+	private static boolean ageDisaggMatches(ValueHolder v, String compiledLabel, String disaggCode,
+	        Map<String, String> ageGroupCodeByLabel) {
+		if (safeEquals(v.getDisag1(), compiledLabel)) {
+			return true;
+		}
+		if (disaggCode == null || ageGroupCodeByLabel == null || ageGroupCodeByLabel.isEmpty()) {
+			return false;
+		}
+		String label = v.getDisag1() == null ? "" : v.getDisag1().trim();
+		String code = ageGroupCodeByLabel.get(label);
+		return code != null && code.trim().equalsIgnoreCase(disaggCode.trim());
+	}
+	
+	/**
+	 * Resolves active age group labels to their stable codes from the live dimension table. The
+	 * generated indicator SQL emits the label at evaluation time, so this map is what ties a
+	 * renamed label back to the code stamped into the compiled design. Returns an empty map on any
+	 * failure so evaluation falls back to plain label matching.
+	 */
+	private Map<String, String> resolveAgeGroupCodeByLabel(EvaluationContext evaluationContext) {
+		Map<String, String> out = new HashMap<String, String>();
+		try {
+			List<Object[]> rows = getEtl("SELECT label, code FROM report_builder_dim_age_group WHERE is_active = 1",
+			    evaluationContext);
+			if (rows != null) {
+				int i;
+				for (i = 0; i < rows.size(); i++) {
+					Object[] r = rows.get(i);
+					if (r == null || r.length < 2 || r[0] == null || r[1] == null) {
+						continue;
+					}
+					String label = String.valueOf(r[0]).trim();
+					String code = String.valueOf(r[1]).trim();
+					if (label.isEmpty() || code.isEmpty()) {
+						continue;
+					}
+					// First spelling wins on the rare ambiguous label; exact label matching in
+					// ageDisaggMatches still takes precedence over the code path.
+					if (!out.containsKey(label)) {
+						out.put(label, code);
+					}
+				}
+			}
+		}
+		catch (Exception e) {
+			System.err.println("Could not resolve age group labels to codes; falling back to label matching: "
+			        + e.getMessage());
+			return new HashMap<String, String>();
+		}
+		return out;
 	}
 	
 	private static DataSetRow placesValueToDataSetRow(JsonNode reportField, ValueHolder valueHolder, DataSetRow row) {

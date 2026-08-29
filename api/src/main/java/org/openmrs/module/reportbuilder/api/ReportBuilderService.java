@@ -13,6 +13,7 @@ import org.openmrs.api.OpenmrsService;
 import org.openmrs.module.reportbuilder.dto.SqlPreviewResult;
 import org.openmrs.module.reportbuilder.legacyconfig.importer.ReportImportResult;
 import org.openmrs.module.reportbuilder.model.*;
+import org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport;
 import org.openmrs.module.reportbuilder.validation.ReportValidationResult;
 import org.openmrs.module.reporting.report.ReportData;
 import org.openmrs.module.reporting.report.ReportDesign;
@@ -223,6 +224,17 @@ public interface ReportBuilderService extends OpenmrsService {
 	
 	@Transactional
 	CompiledReportArtifacts compileReport(String reportBuilderReportUuid);
+	
+	/**
+	 * Compiles a report and optionally adds it to the report library with the specified category.
+	 * This method is reusable from both REST API and export/import processes.
+	 * 
+	 * @param reportBuilderReportUuid The UUID of the report to compile
+	 * @param categoryUuid The UUID of the category to add the report to (can be null)
+	 * @return CompiledReportArtifacts containing the compiled report and metadata
+	 */
+	@Transactional
+	CompiledReportArtifacts compileAndAddToLibrary(String reportBuilderReportUuid, String categoryUuid);
 	
 	@Transactional
 	ReportCategory saveReportCategory(ReportCategory category);
@@ -666,6 +678,15 @@ public interface ReportBuilderService extends OpenmrsService {
 	        File destination);
 	
 	/**
+	 * Export a single compiled report to a self-contained file with dependencies.
+	 * 
+	 * @param reportUuid UUID of the report to export
+	 * @param destination Destination directory for the exported file
+	 * @return File containing the exported compiled report
+	 */
+	java.io.File exportCompiledReport(String reportUuid, java.io.File destination);
+	
+	/**
 	 * Export a single entity of a specific type to a file.
 	 * 
 	 * @param entityType Type of entity to export (e.g., "category", "indicator", "theme")
@@ -743,6 +764,39 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return List of entity types in import order
 	 */
 	java.util.List<String> getImportOrder();
+	
+	// ========== Serialized Report Import Methods ==========
+	
+	/**
+	 * Import a serialized report from a file. This method: 1. Reads the serialized report from the
+	 * file 2. Stores it in the serialized_object table and returns the UUID 3. Creates/updates
+	 * ReportBuilderReport entity 4. Reuses compileAndAddToLibrary to create ReportLibrary entry
+	 * with serialized object UUID 5. Ensures no duplicates by checking existing entries
+	 * 
+	 * @param reportFile The file containing the serialized report
+	 * @param categoryUuid The UUID of the category to add the report to (can be null)
+	 * @return CompiledReportArtifacts containing the imported report and metadata
+	 */
+	CompiledReportArtifacts importSerializedReport(java.io.File reportFile, String categoryUuid);
+	
+	/**
+	 * Import a serialized report directly from a SerializedReport object. This is useful for
+	 * programmatic import without file I/O.
+	 * 
+	 * @param serializedReport The serialized report to import
+	 * @param categoryUuid The UUID of the category to add the report to (can be null)
+	 * @return CompiledReportArtifacts containing the imported report and metadata
+	 */
+	CompiledReportArtifacts importSerializedReportFromObject(SerializedReport serializedReport, String categoryUuid);
+	
+	/**
+	 * Creates or updates the ReportLibrary entry linked to a builder report, syncing name, code,
+	 * category, report type and the compiled ReportDefinition uuid. Safe no-op when the uuid is
+	 * blank or no matching report exists. Failures are logged, never thrown.
+	 * 
+	 * @param reportBuilderReportUuid the builder report to sync into the library
+	 */
+	void saveOrUpdateLibraryEntry(String reportBuilderReportUuid);
 	
 	// ========== Report Package Methods ==========
 	

@@ -1,15 +1,9 @@
 package org.openmrs.module.reportbuilder.web.controller.dto;
 
 /**
- * Request DTO for shipping a single report to a distribution package. Used to initiate the
- * export/shipping process for a ReportBuilder report.
+ * Request DTO for exporting reports. Specifies the export type and destination.
  */
 public class ShippingRequest {
-	
-	/**
-	 * UUID of the report to ship
-	 */
-	private String reportUuid;
 	
 	/**
 	 * Version string for the distribution package
@@ -22,20 +16,17 @@ public class ShippingRequest {
 	 */
 	private String destination;
 	
+	/**
+	 * Export type: "artifacts" for full artifacts with dependencies, "compiledReports" for compiled
+	 * reports only. If not specified, defaults to "artifacts".
+	 */
+	private String type;
+	
 	public ShippingRequest() {
 	}
 	
-	public ShippingRequest(String reportUuid, String version) {
-		this.reportUuid = reportUuid;
+	public ShippingRequest(String version) {
 		this.version = version;
-	}
-	
-	public String getReportUuid() {
-		return reportUuid;
-	}
-	
-	public void setReportUuid(String reportUuid) {
-		this.reportUuid = reportUuid;
 	}
 	
 	public String getVersion() {
@@ -52,5 +43,13 @@ public class ShippingRequest {
 	
 	public void setDestination(String destination) {
 		this.destination = destination;
+	}
+	
+	public String getType() {
+		return type;
+	}
+	
+	public void setType(String type) {
+		this.type = type;
 	}
 }

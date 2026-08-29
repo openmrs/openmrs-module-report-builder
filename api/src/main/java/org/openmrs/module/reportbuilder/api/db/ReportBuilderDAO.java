@@ -111,6 +111,12 @@ public interface ReportBuilderDAO {
 	
 	ReportBuilderReport getReportBuilderReportByUuid(String uuid);
 	
+	/**
+	 * Looks up a builder report by its business code. Used to keep imports idempotent when a
+	 * package carries no shared uuid (e.g. raw compiled design files).
+	 */
+	ReportBuilderReport getReportBuilderReportByCode(String code);
+	
 	List<ReportBuilderReport> getReportBuilderReports(String q, boolean includeRetired, Integer startIndex, Integer limit);
 	
 	void deleteReportBuilderReport(ReportBuilderReport report);

@@ -9,6 +9,9 @@
  */
 package org.openmrs.module.reportbuilder.api.export;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.junit.Assert;
 import org.junit.Test;
 import org.openmrs.module.reportbuilder.web.controller.dto.ImportRequest;
@@ -201,5 +204,74 @@ public class ExportImportServiceSimpleTest {
 		    result.getDependencies().getSections().get(0));
 		Assert.assertEquals("First library should be library1", "library1.json", result.getDependencies().getLibrary()
 		        .get(0));
+	}
+	
+	@Test
+	public void shouldHandleCompiledReportsList() {
+		ShippingResult result = new ShippingResult();
+		
+		// Initially empty
+		Assert.assertNotNull("Compiled reports list should be initialized", result.getCompiledReports());
+		Assert.assertTrue("Compiled reports list should be empty initially", result.getCompiledReports().isEmpty());
+		
+		// Add compiled reports
+		result.getCompiledReports().add("report1.json");
+		result.getCompiledReports().add("report2.json");
+		result.getCompiledReports().add("report3.json");
+		
+		Assert.assertEquals("Should have 3 compiled reports", 3, result.getCompiledReports().size());
+		Assert.assertTrue("Should contain report1", result.getCompiledReports().contains("report1.json"));
+		Assert.assertTrue("Should contain report2", result.getCompiledReports().contains("report2.json"));
+		Assert.assertTrue("Should contain report3", result.getCompiledReports().contains("report3.json"));
+	}
+	
+	@Test
+		public void shouldSetCompiledReportsList() {
+			ShippingResult result = new ShippingResult();
+
+			// Create a new list and set it
+			List<String> newCompiledReports = new ArrayList<>();
+			newCompiledReports.add("compiled-report-a.json");
+			newCompiledReports.add("compiled-report-b.json");
+
+			result.setCompiledReports(newCompiledReports);
+
+			Assert.assertEquals("Should have 2 compiled reports after setting", 2, result.getCompiledReports().size());
+			Assert.assertEquals("First report should match", "compiled-report-a.json", result.getCompiledReports().get(0));
+			Assert.assertEquals("Second report should match", "compiled-report-b.json", result.getCompiledReports().get(1));
+		}
+	
+	@Test
+		public void shouldHandleNullCompiledReports() {
+			ShippingResult result = new ShippingResult();
+
+			// Set to null
+			result.setCompiledReports(null);
+
+			Assert.assertNull("Compiled reports should be null", result.getCompiledReports());
+
+			// Adding to null list should be handled by caller
+			// (service code checks for null before adding)
+			if (result.getCompiledReports() == null) {
+				result.setCompiledReports(new ArrayList<>());
+			}
+			result.getCompiledReports().add("safe-add.json");
+
+			Assert.assertEquals("Should have 1 compiled report after safe add", 1, result.getCompiledReports().size());
+		}
+	
+	@Test
+	public void shouldCombineCompiledReportsWithDependencies() {
+		ShippingResult result = new ShippingResult();
+		
+		// Add both dependencies and compiled reports
+		result.getDependencies().addCategory("category1.json");
+		result.getDependencies().addIndicator("indicator1.json");
+		result.getCompiledReports().add("report1.json");
+		result.getCompiledReports().add("report2.json");
+		
+		Assert.assertEquals("Should have 1 category", 1, result.getDependencies().getCategories().size());
+		Assert.assertEquals("Should have 1 indicator", 1, result.getDependencies().getIndicators().size());
+		Assert.assertEquals("Should have 2 compiled reports", 2, result.getCompiledReports().size());
 	}
 }

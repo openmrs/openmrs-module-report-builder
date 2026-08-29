@@ -669,6 +669,13 @@ public class HibernateReportBuilderDAO implements ReportBuilderDAO {
 		return (ReportBuilderReport) c.uniqueResult();
 	}
 	
+	public ReportBuilderReport getReportBuilderReportByCode(String code) {
+		Criteria c = getSession().createCriteria(ReportBuilderReport.class);
+		c.add(Restrictions.eq("code", code));
+		c.setMaxResults(1);
+		return (ReportBuilderReport) c.uniqueResult();
+	}
+	
 	@SuppressWarnings("unchecked")
 	public List<ReportBuilderReport> getReportBuilderReports(String q, boolean includeRetired, Integer startIndex,
 	        Integer limit) {

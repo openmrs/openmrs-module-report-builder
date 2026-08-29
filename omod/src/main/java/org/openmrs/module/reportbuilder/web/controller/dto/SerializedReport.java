@@ -16,6 +16,7 @@ public class SerializedReport {
     private String code;
     private String version;
     private String category;
+    private String categoryUuid;
     private String subcategory;
     private String reportType;
     private String status;
@@ -94,6 +95,14 @@ public class SerializedReport {
 
     public void setCategory(String category) {
         this.category = category;
+    }
+
+    public String getCategoryUuid() {
+        return categoryUuid;
+    }
+
+    public void setCategoryUuid(String categoryUuid) {
+        this.categoryUuid = categoryUuid;
     }
 
     public String getSubcategory() {
