@@ -3446,7 +3446,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * Import order respecting dependencies - foundation entities first
 	 */
 	private static final java.util.List<String> DEPENDENCY_ORDER = java.util.Arrays.asList("categories", "age-categories",
-	    "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "library");
+	    "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "dashboards", "library");
 	
 	@Override
 	public ShippingResult shipReport(String reportUuid, String version, File destination) {
@@ -3605,6 +3605,12 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 						return exportETLMonitor(etlMonitor, destination);
 					}
 					break;
+				case "dashboard":
+					ReportBuilderDashboard dashboard = getReportBuilderDashboardByUuid(entityUuid);
+					if (dashboard != null) {
+						return exportDashboard(dashboard, destination);
+					}
+					break;
 				case "library":
 					ReportLibrary library = getReportLibraryByUuid(entityUuid);
 					if (library != null) {
@@ -3649,7 +3655,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		
 		// Export all artifacts including reports, indicators, themes, sections, categories, etc.
 		List<String> allEntityTypes = java.util.Arrays.asList("reports", "categories", "library", "indicators", "sections",
-		    "themes", "age-categories", "age-groups", "etl-sources", "etl-monitors");
+		    "themes", "age-categories", "age-groups", "etl-sources", "etl-monitors", "dashboards");
 		
 		return shipAllEntities(allEntityTypes, version, destination);
 	}
@@ -3776,6 +3782,19 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 						}
 						break;
 
+					case "dashboards":
+						List<ReportBuilderDashboard> dashboards = getReportBuilderDashboards(null, false, null, null);
+						for (ReportBuilderDashboard dashboard : dashboards) {
+							try {
+								File dashboardFile = exportEntity("dashboard", dashboard.getUuid(), destination);
+								log.debug("Exported dashboard: {} to {}", dashboard.getName(), dashboardFile.getName());
+							}
+							catch (Exception e) {
+								log.error("Failed to export dashboard: {}", dashboard.getName(), e);
+							}
+						}
+						break;
+
 					case "library":
 						List<ReportLibrary> libraries = getReportLibraries(null, false, null, null);
 						for (ReportLibrary library : libraries) {
@@ -3874,7 +3893,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * Import order respecting dependencies - foundation entities first
 	 */
 	private static final java.util.List<String> IMPORT_ORDER = java.util.Arrays.asList("categories", "age-categories",
-	    "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "library");
+	    "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "dashboards", "library");
 	
 	@Override
 	@Transactional
@@ -3984,6 +4003,10 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 					importReport(file);
 					result.addSuccess(entityType, filename);
 					break;
+				case "dashboard":
+					importDashboard(file);
+					result.addSuccess(entityType, filename);
+					break;
 				case "library":
 					importLibraryEntry(file);
 					result.addSuccess(entityType, filename);
@@ -4075,6 +4098,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		new File(reportbuilderDir, "age-groups").mkdirs();
 		new File(reportbuilderDir, "etl-sources").mkdirs();
 		new File(reportbuilderDir, "etl-monitors").mkdirs();
+		new File(reportbuilderDir, "dashboards").mkdirs();
 		new File(reportbuilderDir, "library").mkdirs();
 		
 		// Create compiled reports directories
@@ -4997,6 +5021,28 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		}
 	}
 	
+	private File exportDashboard(ReportBuilderDashboard dashboard, File destination) {
+		try {
+			String filename = getFileNameForExport(dashboard.getCode(), dashboard.getUuid());
+			File file = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + "dashboards" + File.separator + filename);
+			
+			// Ensure parent directory exists
+			File parentDir = file.getParentFile();
+			if (parentDir != null && !parentDir.exists()) {
+				parentDir.mkdirs();
+			}
+			
+			objectMapper.writeValue(file, dashboard);
+			log.debug("Exported dashboard: {}", file.getAbsolutePath());
+			return file;
+			
+		}
+		catch (IOException e) {
+			throw new APIException("Failed to export dashboard", e);
+		}
+	}
+	
 	private File exportLibrary(ReportLibrary library, File destination) {
 		try {
 			String filename = getFileNameForExport(library.getCode(), library.getUuid());
@@ -5067,6 +5113,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 						break;
 					case "reports":
 						importReport(file);
+						break;
+					case "dashboards":
+						importDashboard(file);
 						break;
 					case "library":
 						importLibraryEntry(file);
@@ -5892,6 +5941,116 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			saveETLMonitor(monitor);
 			log.debug("Created new ETL monitor: {}", monitor.getName());
 		}
+	}
+	
+	/**
+	 * Import a ReportBuilderDashboard entity - reads database model format. Accepts both camelCase
+	 * (this module's export shape) and snake_case config keys for cross-version packages.
+	 */
+	private void importDashboard(File file) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
+		
+		String uuid = node.get("uuid").asText();
+		ReportBuilderDashboard existing = getReportBuilderDashboardByUuid(uuid);
+		if (existing == null && node.has("code") && !node.get("code").isNull() && hasText(node.get("code").asText())) {
+			existing = getReportBuilderDashboardByCode(node.get("code").asText());
+		}
+		
+		String configJson = extractJsonStringField(node, "configJson", "config_json");
+		ReportBuilderDashboard.DashboardType dashboardType = null;
+		for (String key : new String[] { "dashboardType", "dashboard_type" }) {
+			if (dashboardType == null && node.has(key) && !node.get(key).isNull()) {
+				try {
+					dashboardType = ReportBuilderDashboard.DashboardType.valueOf(node.get(key).asText());
+				}
+				catch (IllegalArgumentException e) {
+					log.warn("Invalid dashboard type value: {}", node.get(key).asText());
+				}
+			}
+		}
+		
+		if (existing != null) {
+			// Update existing - all fields
+			existing.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				existing.setDescription(node.get("description").asText());
+			}
+			if (node.has("code") && !node.get("code").isNull()) {
+				existing.setCode(node.get("code").asText());
+			}
+			if (dashboardType != null) {
+				existing.setDashboardType(dashboardType);
+			}
+			if (configJson != null) {
+				existing.setConfigJson(configJson);
+			}
+			if (node.has("active") && !node.get("active").isNull()) {
+				existing.setActive(node.get("active").asBoolean());
+			}
+			if (node.has("sortOrder") && !node.get("sortOrder").isNull()) {
+				existing.setSortOrder(node.get("sortOrder").asInt());
+			}
+			if (node.has("retired")) {
+				existing.setRetired(node.get("retired").asBoolean());
+				if (node.has("retireReason") && !node.get("retireReason").isNull()) {
+					existing.setRetireReason(node.get("retireReason").asText());
+				}
+			}
+			saveReportBuilderDashboard(existing);
+			log.debug("Updated existing dashboard: {}", existing.getName());
+		} else {
+			// Create new - all fields
+			ReportBuilderDashboard dashboard = new ReportBuilderDashboard();
+			dashboard.setUuid(uuid);
+			dashboard.setName(node.get("name").asText());
+			if (node.has("description") && !node.get("description").isNull()) {
+				dashboard.setDescription(node.get("description").asText());
+			}
+			if (node.has("code") && !node.get("code").isNull()) {
+				dashboard.setCode(node.get("code").asText());
+			}
+			if (dashboardType != null) {
+				dashboard.setDashboardType(dashboardType);
+			}
+			if (configJson != null) {
+				dashboard.setConfigJson(configJson);
+			}
+			if (node.has("active") && !node.get("active").isNull()) {
+				dashboard.setActive(node.get("active").asBoolean());
+			}
+			if (node.has("sortOrder") && !node.get("sortOrder").isNull()) {
+				dashboard.setSortOrder(node.get("sortOrder").asInt());
+			}
+			saveReportBuilderDashboard(dashboard);
+			
+			// Handle retired status after save
+			if (node.has("retired") && node.get("retired").asBoolean()) {
+				String reason = node.has("retireReason") && !node.get("retireReason").isNull() ? node.get("retireReason")
+				        .asText() : "Imported as retired";
+				retireReportBuilderDashboard(dashboard, reason);
+			}
+			
+			log.debug("Created new dashboard: {}", dashboard.getName());
+		}
+	}
+	
+	/**
+	 * Extracts a JSON-valued field as its raw string content. Text nodes (this module's export
+	 * shape for config fields) are returned verbatim; structured nodes (cross-version packages
+	 * embedding the JSON object) are re-serialized.
+	 */
+	private String extractJsonStringField(com.fasterxml.jackson.databind.JsonNode node, String... names) throws IOException {
+		for (String name : names) {
+			com.fasterxml.jackson.databind.JsonNode field = node.get(name);
+			if (field != null && !field.isNull()) {
+				if (field.isTextual()) {
+					String text = field.textValue();
+					return text == null || text.trim().isEmpty() ? null : text;
+				}
+				return objectMapper.writeValueAsString(field);
+			}
+		}
+		return null;
 	}
 	
 	/**
