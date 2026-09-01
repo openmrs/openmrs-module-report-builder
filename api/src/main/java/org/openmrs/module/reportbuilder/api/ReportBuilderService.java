@@ -652,6 +652,112 @@ public interface ReportBuilderService extends OpenmrsService {
 	@Transactional
 	void purgeETLMonitor(ETLMonitor monitor);
 	
+	// =========================================================
+	// ReportBuilderDashboard
+	// =========================================================
+	
+	/**
+	 * Save or update a dashboard
+	 * 
+	 * @param dashboard the dashboard to save
+	 * @return the saved dashboard
+	 */
+	@Transactional
+	ReportBuilderDashboard saveReportBuilderDashboard(ReportBuilderDashboard dashboard);
+	
+	/**
+	 * Get a dashboard by ID
+	 * 
+	 * @param id the dashboard ID
+	 * @return the dashboard, or null if not found
+	 */
+	@Transactional(readOnly = true)
+	ReportBuilderDashboard getReportBuilderDashboardById(Integer id);
+	
+	/**
+	 * Get a dashboard by UUID
+	 * 
+	 * @param uuid the dashboard UUID
+	 * @return the dashboard, or null if not found
+	 */
+	@Transactional(readOnly = true)
+	ReportBuilderDashboard getReportBuilderDashboardByUuid(String uuid);
+	
+	/**
+	 * Get a dashboard by code
+	 * 
+	 * @param code the dashboard code
+	 * @return the dashboard, or null if not found
+	 */
+	@Transactional(readOnly = true)
+	ReportBuilderDashboard getReportBuilderDashboardByCode(String code);
+	
+	/**
+	 * Get dashboards with optional search and pagination
+	 * 
+	 * @param q the search query (searches name, code, description)
+	 * @param includeRetired whether to include retired dashboards
+	 * @param startIndex the start index for pagination
+	 * @param limit the maximum number of results
+	 * @return list of dashboards
+	 */
+	@Transactional(readOnly = true)
+	List<ReportBuilderDashboard> getReportBuilderDashboards(String q, boolean includeRetired, Integer startIndex,
+	        Integer limit);
+	
+	/**
+	 * Get all active dashboards
+	 * 
+	 * @return list of active dashboards
+	 */
+	@Transactional(readOnly = true)
+	List<ReportBuilderDashboard> getActiveReportBuilderDashboards();
+	
+	/**
+	 * Get dashboards by type
+	 * 
+	 * @param dashboardType the dashboard type name (ETL, REPORT, CUSTOM)
+	 * @param includeRetired whether to include retired dashboards
+	 * @return list of dashboards of the given type, or empty if the type is unknown
+	 */
+	@Transactional(readOnly = true)
+	List<ReportBuilderDashboard> getReportBuilderDashboardsByType(String dashboardType, boolean includeRetired);
+	
+	/**
+	 * Get count of dashboards with optional search
+	 * 
+	 * @param q the search query
+	 * @param includeRetired whether to include retired dashboards
+	 * @return the count of dashboards
+	 */
+	@Transactional(readOnly = true)
+	long getReportBuilderDashboardsCount(String q, boolean includeRetired);
+	
+	/**
+	 * Retire a dashboard
+	 * 
+	 * @param dashboard the dashboard to retire
+	 * @param reason the reason for retiring
+	 */
+	@Transactional
+	void retireReportBuilderDashboard(ReportBuilderDashboard dashboard, String reason);
+	
+	/**
+	 * Unretire a dashboard
+	 * 
+	 * @param dashboard the dashboard to unretire
+	 */
+	@Transactional
+	void unretireReportBuilderDashboard(ReportBuilderDashboard dashboard);
+	
+	/**
+	 * Permanently delete a dashboard
+	 * 
+	 * @param dashboard the dashboard to purge
+	 */
+	@Transactional
+	void purgeReportBuilderDashboard(ReportBuilderDashboard dashboard);
+	
 	// ========== Report Shipping Methods ==========
 	
 	/**

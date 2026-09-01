@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                   http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-3.8.xsd">
+
+    <changeSet id="reportbuilder-20260901-01-dashboard" author="slubwama">
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <tableExists tableName="report_builder_dashboard"/>
+            </not>
+        </preConditions>
+
+        <createTable tableName="report_builder_dashboard">
+            <!-- Primary Key -->
+            <column name="report_builder_dashboard_id" type="INT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+
+            <!-- OpenMRS BaseOpenmrsMetadata Fields -->
+            <column name="uuid" type="VARCHAR(38)">
+                <constraints nullable="false" unique="true"/>
+            </column>
+
+            <column name="name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="description" type="TEXT"/>
+
+            <column name="creator" type="INT">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="date_created" type="DATETIME">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="changed_by" type="INT"/>
+            <column name="date_changed" type="DATETIME"/>
+
+            <column name="retired" type="BIT(1)" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="retired_by" type="INT"/>
+            <column name="date_retired" type="DATETIME"/>
+            <column name="retire_reason" type="VARCHAR(255)"/>
+
+            <!-- ReportBuilderDashboard-specific Fields -->
+            <column name="code" type="VARCHAR(100)"/>
+
+            <column name="dashboard_type" type="VARCHAR(30)" defaultValue="CUSTOM">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="config_json" type="LONGTEXT"/>
+
+            <column name="active" type="BIT(1)" defaultValueBoolean="true">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="sort_order" type="INT" defaultValueNumeric="0"/>
+        </createTable>
+
+        <!-- Foreign Keys -->
+        <addForeignKeyConstraint
+                baseTableName="report_builder_dashboard"
+                baseColumnNames="creator"
+                referencedTableName="users"
+                referencedColumnNames="user_id"
+                constraintName="fk_dashboard_creator"/>
+
+        <addForeignKeyConstraint
+                baseTableName="report_builder_dashboard"
+                baseColumnNames="changed_by"
+                referencedTableName="users"
+                referencedColumnNames="user_id"
+                constraintName="fk_dashboard_changed_by"/>
+
+        <addForeignKeyConstraint
+                baseTableName="report_builder_dashboard"
+                baseColumnNames="retired_by"
+                referencedTableName="users"
+                referencedColumnNames="user_id"
+                constraintName="fk_dashboard_retired_by"/>
+
+        <!-- Indexes -->
+        <createIndex tableName="report_builder_dashboard"
+                     indexName="idx_dashboard_uuid"
+                     unique="true">
+            <column name="uuid"/>
+        </createIndex>
+
+        <createIndex tableName="report_builder_dashboard"
+                     indexName="idx_dashboard_code">
+            <column name="code"/>
+        </createIndex>
+
+        <createIndex tableName="report_builder_dashboard"
+                     indexName="idx_dashboard_active">
+            <column name="active"/>
+        </createIndex>
+
+        <createIndex tableName="report_builder_dashboard"
+                     indexName="idx_dashboard_type">
+            <column name="dashboard_type"/>
+        </createIndex>
+
+        <createIndex tableName="report_builder_dashboard"
+                     indexName="idx_dashboard_retired">
+            <column name="retired"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

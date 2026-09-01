@@ -3328,6 +3328,118 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		dao.purgeETLMonitor(monitor);
 	}
 	
+	// =========================================================
+	// ReportBuilderDashboard CRUD methods
+	// =========================================================
+	
+	@Override
+	@Transactional
+	public ReportBuilderDashboard saveReportBuilderDashboard(ReportBuilderDashboard dashboard) {
+		if (dashboard.getName() == null || dashboard.getName().trim().isEmpty()) {
+			throw new APIException("Dashboard name is required");
+		}
+		
+		// Null-defaults
+		if (dashboard.getDashboardType() == null) {
+			dashboard.setDashboardType(ReportBuilderDashboard.DashboardType.CUSTOM);
+		}
+		if (dashboard.getActive() == null) {
+			dashboard.setActive(true);
+		}
+		if (dashboard.getSortOrder() == null) {
+			dashboard.setSortOrder(0);
+		}
+		if (dashboard.getUuid() == null) {
+			dashboard.setUuid(UUID.randomUUID().toString());
+		}
+		
+		// Code uniqueness is service-level only; there is no DB unique constraint on code
+		String code = dashboard.getCode() == null ? null : dashboard.getCode().trim();
+		dashboard.setCode(code);
+		if (code != null && !code.isEmpty()) {
+			ReportBuilderDashboard existing = dao.getDashboardByCode(code);
+			if (existing != null && !existing.getUuid().equals(dashboard.getUuid())) {
+				throw new APIException("Dashboard code '" + code + "' is already in use by dashboard '" + existing.getName()
+				        + "'");
+			}
+		}
+		
+		// configJson is stored opaquely; only its JSON validity is enforced, never its schema
+		String configJson = dashboard.getConfigJson();
+		if (configJson != null && !configJson.trim().isEmpty()) {
+			try {
+				objectMapper.readTree(configJson);
+			}
+			catch (Exception e) {
+				throw new APIException("configJson is not valid JSON: " + e.getMessage());
+			}
+		}
+		
+		return dao.saveReportBuilderDashboard(dashboard);
+	}
+	
+	@Override
+	public ReportBuilderDashboard getReportBuilderDashboardById(Integer id) {
+		return dao.getDashboardById(id);
+	}
+	
+	@Override
+	public ReportBuilderDashboard getReportBuilderDashboardByUuid(String uuid) {
+		return dao.getDashboardByUuid(uuid);
+	}
+	
+	@Override
+	public ReportBuilderDashboard getReportBuilderDashboardByCode(String code) {
+		return dao.getDashboardByCode(code);
+	}
+	
+	@Override
+	public List<ReportBuilderDashboard> getReportBuilderDashboards(String q, boolean includeRetired, Integer startIndex,
+	        Integer limit) {
+		return dao.getDashboards(q, includeRetired, startIndex, limit);
+	}
+	
+	@Override
+	public List<ReportBuilderDashboard> getActiveReportBuilderDashboards() {
+		return dao.getActiveDashboards();
+	}
+	
+	@Override
+	public List<ReportBuilderDashboard> getReportBuilderDashboardsByType(String dashboardType, boolean includeRetired) {
+		return dao.getDashboardsByType(dashboardType, includeRetired);
+	}
+	
+	@Override
+	public long getReportBuilderDashboardsCount(String q, boolean includeRetired) {
+		return dao.getDashboardsCount(q, includeRetired);
+	}
+	
+	@Override
+	@Transactional
+	public void retireReportBuilderDashboard(ReportBuilderDashboard dashboard, String reason) {
+		dashboard.setRetired(true);
+		dashboard.setRetiredBy(Context.getAuthenticatedUser());
+		dashboard.setDateRetired(new Date());
+		dashboard.setRetireReason(reason);
+		dao.saveReportBuilderDashboard(dashboard);
+	}
+	
+	@Override
+	@Transactional
+	public void unretireReportBuilderDashboard(ReportBuilderDashboard dashboard) {
+		dashboard.setRetired(false);
+		dashboard.setRetiredBy(null);
+		dashboard.setDateRetired(null);
+		dashboard.setRetireReason(null);
+		dao.saveReportBuilderDashboard(dashboard);
+	}
+	
+	@Override
+	@Transactional
+	public void purgeReportBuilderDashboard(ReportBuilderDashboard dashboard) {
+		dao.purgeReportBuilderDashboard(dashboard);
+	}
+	
 	// ========== Report Shipping Method Implementations ==========
 	
 	/**

@@ -975,4 +975,7 @@
     <!-- Include ETL Monitor changelog -->
     <include file="liquibase/etl-monitor-changelog.xml" relativeToChangelogFile="false"/>
 
+    <!-- Include Dashboard changelog -->
+    <include file="liquibase/dashboard-changelog.xml" relativeToChangelogFile="false"/>
+
 </databaseChangeLog>

@@ -1,0 +1,215 @@
+/**
+ * This Source Code Form is subject to the terms of the Mozilla Public License,
+ * v. 2.0. If a copy of the MPL was not distributed with this file, You can
+ * obtain one at http://mozilla.org/MPL/2.0/. OpenMRS is also distributed under
+ * the terms of the Healthcare Disclaimer located at http://openmrs.org/license.
+ *
+ * Copyright (C) OpenMRS Inc. OpenMRS is a registered trademark and the OpenMRS
+ * graphic logo is a trademark of OpenMRS Inc.
+ */
+package org.openmrs.module.reportbuilder.web.resource;
+
+import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.api.ReportBuilderService;
+import org.openmrs.module.reportbuilder.model.ReportBuilderDashboard;
+import org.openmrs.module.webservices.rest.web.RequestContext;
+import org.openmrs.module.webservices.rest.web.RestConstants;
+import org.openmrs.module.webservices.rest.web.annotation.Resource;
+import org.openmrs.module.webservices.rest.web.representation.DefaultRepresentation;
+import org.openmrs.module.webservices.rest.web.representation.FullRepresentation;
+import org.openmrs.module.webservices.rest.web.representation.Representation;
+import org.openmrs.module.webservices.rest.web.resource.api.PageableResult;
+import org.openmrs.module.webservices.rest.web.resource.impl.DelegatingCrudResource;
+import org.openmrs.module.webservices.rest.web.resource.impl.DelegatingResourceDescription;
+import org.openmrs.module.webservices.rest.web.resource.impl.AlreadyPaged;
+import org.openmrs.module.webservices.rest.web.resource.impl.NeedsPaging;
+import org.openmrs.module.webservices.rest.web.response.ResponseException;
+
+import java.util.List;
+
+/**
+ * REST resource for ReportBuilder Dashboard CRUD operations. Provides endpoints for managing
+ * dashboard configurations. Dashboards can be looked up by UUID or code; code lookup exists because
+ * the frontend routes by code (/dashboards/:code).
+ */
+@Resource(name = RestConstants.VERSION_1 + "/reportbuilder/dashboard", supportedClass = ReportBuilderDashboard.class, supportedOpenmrsVersions = { "1.8 - 9.0.*" })
+public class ReportBuilderDashboardResource extends DelegatingCrudResource<ReportBuilderDashboard> {
+	
+	private ReportBuilderService service() {
+		return Context.getService(ReportBuilderService.class);
+	}
+	
+	@Override
+	public ReportBuilderDashboard newDelegate() {
+		return new ReportBuilderDashboard();
+	}
+	
+	@Override
+	public ReportBuilderDashboard save(ReportBuilderDashboard delegate) {
+		return service().saveReportBuilderDashboard(delegate);
+	}
+	
+	/**
+	 * Looks up a dashboard by UUID, then by code (the frontend routes by code), then by numeric id
+	 * as a last resort.
+	 * 
+	 * @see org.openmrs.module.webservices.rest.web.resource.impl.DelegatingCrudResource#getByUniqueId(java.lang.String)
+	 */
+	@Override
+	public ReportBuilderDashboard getByUniqueId(String idOrCode) {
+		if (idOrCode == null) {
+			return null;
+		}
+		String value = idOrCode.trim();
+		
+		ReportBuilderDashboard dashboard = service().getReportBuilderDashboardByUuid(value);
+		if (dashboard == null) {
+			dashboard = service().getReportBuilderDashboardByCode(value);
+		}
+		if (dashboard == null && value.matches("\\d+")) {
+			dashboard = service().getReportBuilderDashboardById(Integer.valueOf(value));
+		}
+		return dashboard;
+	}
+	
+	@Override
+	protected PageableResult doGetAll(RequestContext context) throws ResponseException {
+		String q = trimToNull(context.getParameter("q"));
+		Boolean includeRetired = parseBooleanOrNull(context.getParameter("includeRetired"));
+		String type = trimToNull(context.getParameter("type"));
+		Boolean activeOnly = parseBooleanOrNull(context.getParameter("activeOnly"));
+		
+		// Default to not including retired unless explicitly requested
+		boolean includeRetiredFinal = (includeRetired != null) ? includeRetired : false;
+		
+		List<ReportBuilderDashboard> results;
+		
+		if (type != null) {
+			// Filter by dashboard type
+			results = service().getReportBuilderDashboardsByType(type, includeRetiredFinal);
+		} else if (activeOnly != null && activeOnly) {
+			// Get only active dashboards
+			results = service().getActiveReportBuilderDashboards();
+		} else if (q != null) {
+			// Search with query
+			results = service().getReportBuilderDashboards(q, includeRetiredFinal, context.getStartIndex(),
+			    context.getLimit());
+			return new NeedsPaging<ReportBuilderDashboard>(results, context);
+		} else {
+			// Get all with pagination
+			results = service().getReportBuilderDashboards(null, includeRetiredFinal, context.getStartIndex(),
+			    context.getLimit());
+			return new NeedsPaging<ReportBuilderDashboard>(results, context);
+		}
+		
+		// For type and activeOnly queries, return as already paged
+		return new AlreadyPaged<ReportBuilderDashboard>(context, results, false);
+	}
+	
+	@Override
+	protected PageableResult doSearch(RequestContext context) throws ResponseException {
+		String q = trimToNull(context.getParameter("q"));
+		Boolean includeRetired = parseBooleanOrNull(context.getParameter("includeRetired"));
+		
+		boolean includeRetiredFinal = (includeRetired != null) ? includeRetired : false;
+		
+		List<ReportBuilderDashboard> results = service().getReportBuilderDashboards(q, includeRetiredFinal,
+		    context.getStartIndex(), context.getLimit());
+		
+		return new NeedsPaging<ReportBuilderDashboard>(results, context);
+	}
+	
+	@Override
+	protected void delete(ReportBuilderDashboard delegate, String reason, RequestContext context) throws ResponseException {
+		if (reason == null || reason.trim().isEmpty()) {
+			reason = "Retired via REST API";
+		}
+		service().retireReportBuilderDashboard(delegate, reason);
+	}
+	
+	@Override
+	public void purge(ReportBuilderDashboard delegate, RequestContext context) throws ResponseException {
+		service().purgeReportBuilderDashboard(delegate);
+	}
+	
+	@Override
+	public DelegatingResourceDescription getRepresentationDescription(Representation rep) {
+		DelegatingResourceDescription description = new DelegatingResourceDescription();
+		
+		if (rep instanceof DefaultRepresentation) {
+			description.addProperty("uuid");
+			description.addProperty("name");
+			description.addProperty("description");
+			description.addProperty("code");
+			description.addProperty("dashboardType");
+			description.addProperty("active");
+			description.addProperty("sortOrder");
+			description.addProperty("retired");
+			description.addSelfLink();
+			description.addLink("full", ".?v=" + RestConstants.REPRESENTATION_FULL);
+			return description;
+		}
+		
+		if (rep instanceof FullRepresentation) {
+			description.addProperty("uuid");
+			description.addProperty("name");
+			description.addProperty("description");
+			description.addProperty("code");
+			description.addProperty("dashboardType");
+			description.addProperty("configJson");
+			description.addProperty("active");
+			description.addProperty("sortOrder");
+			description.addProperty("retired");
+			description.addProperty("dateCreated");
+			description.addProperty("dateChanged");
+			description.addProperty("creator");
+			description.addProperty("changedBy");
+			description.addSelfLink();
+			return description;
+		}
+		
+		return null;
+	}
+	
+	@Override
+	public DelegatingResourceDescription getCreatableProperties() {
+		DelegatingResourceDescription description = new DelegatingResourceDescription();
+		description.addRequiredProperty("name");
+		description.addProperty("description");
+		description.addProperty("code");
+		description.addProperty("dashboardType");
+		description.addProperty("configJson");
+		description.addProperty("active");
+		description.addProperty("sortOrder");
+		return description;
+	}
+	
+	// Helper methods
+	
+	/**
+	 * Trim a string to null if empty
+	 */
+	private String trimToNull(String value) {
+		if (value == null || value.trim().isEmpty()) {
+			return null;
+		}
+		return value.trim();
+	}
+	
+	/**
+	 * Parse a boolean string to Boolean, or null if not a valid boolean
+	 */
+	private Boolean parseBooleanOrNull(String value) {
+		if (value == null || value.trim().isEmpty()) {
+			return null;
+		}
+		value = value.trim().toLowerCase();
+		if ("true".equals(value)) {
+			return true;
+		}
+		if ("false".equals(value)) {
+			return false;
+		}
+		return null;
+	}
+}

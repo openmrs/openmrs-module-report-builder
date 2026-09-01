@@ -7,6 +7,7 @@ import org.openmrs.module.reportbuilder.model.LegacyReport;
 import org.openmrs.module.reportbuilder.model.LegacyReportConfig;
 import org.openmrs.module.reportbuilder.model.ReportBuilderAgeCategory;
 import org.openmrs.module.reportbuilder.model.ReportBuilderAgeGroup;
+import org.openmrs.module.reportbuilder.model.ReportBuilderDashboard;
 import org.openmrs.module.reportbuilder.model.ReportBuilderDataTheme;
 import org.openmrs.module.reportbuilder.model.ReportBuilderIndicator;
 import org.openmrs.module.reportbuilder.model.ReportBuilderReport;
@@ -211,4 +212,26 @@ public interface ReportBuilderDAO {
 	long getETLMonitorsCount(String qStr, boolean includeRetired);
 	
 	void purgeETLMonitor(ETLMonitor monitor);
+	
+	// =========================================================
+	// ReportBuilderDashboard CRUD methods
+	// =========================================================
+	
+	ReportBuilderDashboard saveReportBuilderDashboard(ReportBuilderDashboard dashboard);
+	
+	ReportBuilderDashboard getDashboardById(Integer id);
+	
+	ReportBuilderDashboard getDashboardByUuid(String uuid);
+	
+	ReportBuilderDashboard getDashboardByCode(String code);
+	
+	List<ReportBuilderDashboard> getDashboards(String qStr, boolean includeRetired, Integer startIndex, Integer limit);
+	
+	List<ReportBuilderDashboard> getActiveDashboards();
+	
+	List<ReportBuilderDashboard> getDashboardsByType(String dashboardType, boolean includeRetired);
+	
+	long getDashboardsCount(String qStr, boolean includeRetired);
+	
+	void purgeReportBuilderDashboard(ReportBuilderDashboard dashboard);
 }

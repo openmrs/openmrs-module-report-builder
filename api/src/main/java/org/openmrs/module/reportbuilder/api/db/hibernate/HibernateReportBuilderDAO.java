@@ -1216,4 +1216,125 @@ public class HibernateReportBuilderDAO implements ReportBuilderDAO {
 	public void purgeETLMonitor(ETLMonitor monitor) {
 		getSession().delete(monitor);
 	}
+	
+	// =========================================================
+	// ReportBuilderDashboard CRUD methods
+	// =========================================================
+	
+	@Override
+	public ReportBuilderDashboard saveReportBuilderDashboard(ReportBuilderDashboard dashboard) {
+		getSession().saveOrUpdate(dashboard);
+		return dashboard;
+	}
+	
+	@Override
+	public ReportBuilderDashboard getDashboardById(Integer id) {
+		return (ReportBuilderDashboard) getSession().get(ReportBuilderDashboard.class, id);
+	}
+	
+	@Override
+	public ReportBuilderDashboard getDashboardByUuid(String uuid) {
+		Criteria c = getSession().createCriteria(ReportBuilderDashboard.class);
+		c.add(Restrictions.eq("uuid", uuid));
+		return (ReportBuilderDashboard) c.uniqueResult();
+	}
+	
+	@Override
+	public ReportBuilderDashboard getDashboardByCode(String code) {
+		if (code == null || code.trim().isEmpty()) {
+			return null;
+		}
+		Criteria c = getSession().createCriteria(ReportBuilderDashboard.class);
+		c.add(Restrictions.eq("code", code.trim()));
+		return (ReportBuilderDashboard) c.uniqueResult();
+	}
+	
+	@Override
+	public List<ReportBuilderDashboard> getDashboards(String qStr, boolean includeRetired, Integer startIndex, Integer limit) {
+		Criteria c = getSession().createCriteria(ReportBuilderDashboard.class);
+		c.setCacheMode(CacheMode.IGNORE);
+		
+		if (!includeRetired) {
+			c.add(Restrictions.eq("retired", false));
+		}
+		
+		if (qStr != null && !qStr.trim().isEmpty()) {
+			Disjunction or = Restrictions.disjunction();
+			String likeStr = like(qStr);
+			or.add(Restrictions.like("name", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("code", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("description", likeStr, MatchMode.ANYWHERE));
+			c.add(or);
+		}
+		
+		c.addOrder(Order.asc("sortOrder"));
+		c.addOrder(Order.desc("dateCreated"));
+		
+		if (startIndex != null && startIndex > 0) {
+			c.setFirstResult(startIndex);
+		}
+		if (limit != null && limit > 0) {
+			c.setMaxResults(limit);
+		}
+		
+		return c.list();
+	}
+	
+	@Override
+	public List<ReportBuilderDashboard> getActiveDashboards() {
+		Criteria c = getSession().createCriteria(ReportBuilderDashboard.class);
+		c.add(Restrictions.eq("retired", false));
+		c.add(Restrictions.eq("active", true));
+		c.addOrder(Order.asc("sortOrder"));
+		c.addOrder(Order.asc("name"));
+		return c.list();
+	}
+	
+	@Override
+	public List<ReportBuilderDashboard> getDashboardsByType(String dashboardType, boolean includeRetired) {
+		ReportBuilderDashboard.DashboardType type;
+		try {
+			type = ReportBuilderDashboard.DashboardType.valueOf(dashboardType);
+		}
+		catch (IllegalArgumentException | NullPointerException e) {
+			return Collections.emptyList();
+		}
+		
+		Criteria c = getSession().createCriteria(ReportBuilderDashboard.class);
+		c.setCacheMode(CacheMode.IGNORE);
+		
+		if (!includeRetired) {
+			c.add(Restrictions.eq("retired", false));
+		}
+		
+		c.add(Restrictions.eq("dashboardType", type));
+		c.addOrder(Order.asc("sortOrder"));
+		return c.list();
+	}
+	
+	@Override
+	public long getDashboardsCount(String qStr, boolean includeRetired) {
+		Criteria c = getSession().createCriteria(ReportBuilderDashboard.class);
+		c.setProjection(Projections.rowCount());
+		
+		if (!includeRetired) {
+			c.add(Restrictions.eq("retired", false));
+		}
+		
+		if (qStr != null && !qStr.trim().isEmpty()) {
+			Disjunction or = Restrictions.disjunction();
+			String likeStr = like(qStr);
+			or.add(Restrictions.like("name", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("code", likeStr, MatchMode.ANYWHERE));
+			or.add(Restrictions.like("description", likeStr, MatchMode.ANYWHERE));
+			c.add(or);
+		}
+		
+		return ((Long) c.uniqueResult()).longValue();
+	}
+	
+	@Override
+	public void purgeReportBuilderDashboard(ReportBuilderDashboard dashboard) {
+		getSession().delete(dashboard);
+	}
 }
