@@ -889,9 +889,13 @@ public class HibernateReportBuilderDAO implements ReportBuilderDAO {
 	}
 	
 	public ReportLibrary getReportLibraryByBuilderReportUuid(String builderReportUuid) {
+		// Tolerates legacy duplicate library rows pointing at the same report instead of failing
+		// with NonUniqueResultException
 		Criteria c = getSession().createCriteria(ReportLibrary.class);
 		c.add(Restrictions.eq("reportBuilderReportUuid", builderReportUuid));
-		return (ReportLibrary) c.uniqueResult();
+		c.setMaxResults(1);
+		java.util.List<?> matches = c.list();
+		return matches.isEmpty() ? null : (ReportLibrary) matches.get(0);
 	}
 	
 	public void purgeReportLibrary(ReportLibrary reportLibrary) {

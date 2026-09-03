@@ -78,10 +78,15 @@ import org.openmrs.util.OpenmrsUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -3648,16 +3653,21 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		return getDefaultShippingDirectory();
 	}
 	
+	/**
+	 * Entity types the bulk export owns, in the order used by {@link #shipAllReports(String, File)}
+	 * Also the whitelist of directories {@link #cleanExportDirectories(File, java.util.List)} may
+	 * clear.
+	 */
+	private static final List<String> EXPORTABLE_ENTITY_TYPES = java.util.Arrays.asList("reports", "categories", "library",
+	    "indicators", "sections", "themes", "age-categories", "age-groups", "etl-sources", "etl-monitors", "dashboards");
+	
 	@Override
 	@Transactional(readOnly = true)
 	public ShippingResult shipAllReports(String version, File destination) {
 		log.info("Starting export of all ReportBuilder artifacts and reports, version: {}", version);
-		
+
 		// Export all artifacts including reports, indicators, themes, sections, categories, etc.
-		List<String> allEntityTypes = java.util.Arrays.asList("reports", "categories", "library", "indicators", "sections",
-		    "themes", "age-categories", "age-groups", "etl-sources", "etl-monitors", "dashboards");
-		
-		return shipAllEntities(allEntityTypes, version, destination);
+		return shipAllEntities(new ArrayList<>(EXPORTABLE_ENTITY_TYPES), version, destination);
 	}
 	
 	@Override
@@ -3670,11 +3680,19 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		ShippingResult result = new ShippingResult();
 		result.setVersion(version);
 		result.setSuccess(true);
+		List<String> exportFailures = new ArrayList<>();
 
 		try {
+			CURRENT_EXPORT_FILENAMES.set(new java.util.HashSet<String>());
+
 			// Create proper directory structure: configuration/reportbuilder/ and configuration/reports/
 			createShippingDirectories(destination);
 			log.info("Created directory structure at: {}", new File(destination, "configuration").getAbsolutePath());
+
+			// Remove stale json from the entity directories this run owns, so repeated exports into
+			// the same destination produce a clean snapshot of the source rather than an accumulation
+			// across runs
+			cleanExportDirectories(destination, entityTypes);
 
 			// Export each entity type
 			for (String entityType : entityTypes) {
@@ -3689,9 +3707,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported report: {} to {}", report.getName(), reportFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export report: {}", report.getName(), e);
-								result.setSuccess(false);
-								result.setErrorMessage("Failed to export report: " + report.getName());
+								recordExportFailure(result, exportFailures, "report " + report.getName(), e);
 							}
 						}
 						break;
@@ -3704,7 +3720,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported category: {} to {}", cat.getName(), categoryFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export category: {}", cat.getName(), e);
+								recordExportFailure(result, exportFailures, "category " + cat.getName(), e);
 							}
 						}
 						break;
@@ -3717,7 +3733,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported theme: {} to {}", theme.getName(), themeFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export theme: {}", theme.getName(), e);
+								recordExportFailure(result, exportFailures, "theme " + theme.getName(), e);
 							}
 						}
 						break;
@@ -3737,7 +3753,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported indicator: {} to {}", ind.getName(), indicatorFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export indicator: {}", ind.getName(), e);
+								recordExportFailure(result, exportFailures, "indicator " + ind.getName(), e);
 							}
 						}
 						break;
@@ -3750,7 +3766,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported section: {} to {}", section.getName(), sectionFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export section: {}", section.getName(), e);
+								recordExportFailure(result, exportFailures, "section " + section.getName(), e);
 							}
 						}
 						break;
@@ -3763,23 +3779,17 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported age category: {} to {}", ageCategory.getName(), ageCatFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export age category: {}", ageCategory.getName(), e);
+								recordExportFailure(result, exportFailures, "age category " + ageCategory.getName(), e);
 							}
 						}
 						break;
 
 					case "age-groups":
-						List<ReportBuilderAgeGroup> ageGroups = getAgeGroups(null, null, null, null, null);
-						for (ReportBuilderAgeGroup ageGroup : ageGroups) {
-							try {
-								// Age groups use ID instead of UUID
-								File ageGroupFile = exportEntity("age-group", String.valueOf(ageGroup.getId()), destination);
-								log.debug("Exported age group: {} to {}", ageGroup.getLabel(), ageGroupFile.getName());
-							}
-							catch (Exception e) {
-								log.error("Failed to export age group: {}", ageGroup.getLabel(), e);
-							}
-						}
+						// Age groups belong to their age category and are embedded in its export file -
+						// no separate age-group files are written. The directory is still cleared by
+						// cleanExportDirectories so legacy separate files do not linger in reused
+						// destinations.
+						log.debug("Age groups are exported embedded in their age categories");
 						break;
 
 					case "dashboards":
@@ -3790,7 +3800,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported dashboard: {} to {}", dashboard.getName(), dashboardFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export dashboard: {}", dashboard.getName(), e);
+								recordExportFailure(result, exportFailures, "dashboard " + dashboard.getName(), e);
 							}
 						}
 						break;
@@ -3803,7 +3813,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported library: {} to {}", library.getName(), libraryFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export library: {}", library.getName(), e);
+								recordExportFailure(result, exportFailures, "library " + library.getName(), e);
 							}
 						}
 						break;
@@ -3816,7 +3826,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported ETL source: {} to {}", source.getName(), sourceFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export ETL source: {}", source.getName(), e);
+								recordExportFailure(result, exportFailures, "ETL source " + source.getName(), e);
 							}
 						}
 						break;
@@ -3829,7 +3839,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 								log.debug("Exported ETL monitor: {} to {}", monitor.getName(), monitorFile.getName());
 							}
 							catch (Exception e) {
-								log.error("Failed to export ETL monitor: {}", monitor.getName(), e);
+								recordExportFailure(result, exportFailures, "ETL monitor " + monitor.getName(), e);
 							}
 						}
 						break;
@@ -3844,6 +3854,12 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			File reportbuilderDir = new File(destination, "configuration" + File.separator + "reportbuilder");
 			createShippingVersionFile(reportbuilderDir, version);
 
+			if (!exportFailures.isEmpty()) {
+				result.setSuccess(false);
+				result.setErrorMessage("Failed to export " + exportFailures.size() + " entities. First failure: "
+				        + exportFailures.get(0));
+			}
+
 			result.setReportCode("BULK_EXPORT");
 			result.setSourceFile(reportbuilderDir.getAbsolutePath());
 			result.setVersionFile(new File(reportbuilderDir, "version.json").getAbsolutePath());
@@ -3855,6 +3871,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			log.error("Failed to complete bulk export", e);
 			result.setSuccess(false);
 			result.setErrorMessage("Failed to complete bulk export: " + e.getMessage());
+		}
+		finally {
+			CURRENT_EXPORT_FILENAMES.remove();
 		}
 
 		return result;
@@ -3895,11 +3914,19 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	private static final java.util.List<String> IMPORT_ORDER = java.util.Arrays.asList("categories", "age-categories",
 	    "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "dashboards", "library");
 	
+	/**
+	 * Imports a distribution package directory. Each entity file is imported in its own independent
+	 * transaction (REQUIRES_NEW), so a failure rolls back and is reported for that item only while
+	 * every other item still commits. Runs with NOT_SUPPORTED so a caller's transaction, if any, is
+	 * suspended for the duration: imported items are committed independently and remain persisted
+	 * even if the caller's transaction later rolls back.
+	 */
 	@Override
-	@Transactional
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public ImportResult importFromDirectory(File sourceDir) {
 		ImportResult result = new ImportResult();
 		result.setSummary("Import from directory: " + sourceDir.getAbsolutePath());
+		TransactionTemplate template = newImportTransactionTemplate();
 		
 		try {
 			log.info("Starting import from directory: {}", sourceDir.getAbsolutePath());
@@ -3927,7 +3954,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			for (String type : IMPORT_ORDER) {
 				File typeDir = new File(reportbuilderDir, type);
 				if (typeDir.exists() && typeDir.isDirectory()) {
-					importType(type, typeDir, result);
+					importType(type, typeDir, result, template);
 				}
 			}
 			
@@ -3958,73 +3985,81 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		return result;
 	}
 	
+	/**
+	 * Imports a single entity file in its own independent transaction (REQUIRES_NEW). On failure
+	 * the item is rolled back and reported in the returned result instead of propagating to the
+	 * caller.
+	 */
 	@Override
+	@Transactional(propagation = Propagation.NOT_SUPPORTED)
 	public ImportResult importEntity(String entityType, File file) {
 		ImportResult result = new ImportResult();
-		
+
 		try {
 			String filename = file.getName();
 			log.info("Importing {} from file: {}", entityType, filename);
-			
-			switch (entityType.toLowerCase()) {
-				case "category":
-					importCategory(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "age-category":
-					importAgeCategory(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "age-group":
-					importAgeGroup(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "etl-source":
-					importETLSource(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "etl-monitor":
-					importETLMonitor(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "indicator":
-					importIndicator(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "section":
-					importSection(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "theme":
-					importTheme(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "report":
-					importReport(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "dashboard":
-					importDashboard(file);
-					result.addSuccess(entityType, filename);
-					break;
-				case "library":
-					importLibraryEntry(file);
-					result.addSuccess(entityType, filename);
-					break;
-				default:
-					result.addError(entityType, filename, "Unknown entity type: " + entityType);
+
+			Boolean imported = newImportTransactionTemplate().execute(status -> {
+				try {
+					switch (entityType.toLowerCase()) {
+						case "category":
+							importCategory(file);
+							break;
+						case "age-category":
+							importAgeCategory(file);
+							break;
+						case "age-group":
+							importAgeGroup(file);
+							break;
+						case "etl-source":
+							importETLSource(file);
+							break;
+						case "etl-monitor":
+							importETLMonitor(file);
+							break;
+						case "indicator":
+							importIndicator(file);
+							break;
+						case "section":
+							importSection(file);
+							break;
+						case "theme":
+							importTheme(file);
+							break;
+						case "report":
+							importReport(file);
+							break;
+						case "dashboard":
+							importDashboard(file);
+							break;
+						case "library":
+							importLibraryEntry(file);
+							break;
+						default:
+							result.addError(entityType, filename, "Unknown entity type: " + entityType);
+							return false;
+					}
+					return true;
+				}
+				catch (IOException e) {
+					throw new UncheckedIOException(e);
+				}
+			});
+
+			if (Boolean.TRUE.equals(imported)) {
+				result.addSuccess(entityType, filename);
 			}
-			
 			result.setSummary("Imported 1 entity");
-			
+
 		}
 		catch (Exception e) {
 			log.error("Failed to import entity from: {}", file.getName(), e);
-			result.addError(entityType, file.getName(), e.getMessage());
+			result.addError(entityType, file.getName(), describeFailure(e));
 			result.setSuccess(false);
-			result.setSummary("Import failed: " + e.getMessage());
+			result.setSummary("Import failed: " + describeFailure(e));
+			clearSessionAfterFailure();
 		}
-		
+
 		return result;
 	}
 	
@@ -4082,6 +4117,45 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * Create the required directory structure for shipping Creates:
 	 * {destination}/configuration/reportbuilder/ and {destination}/configuration/reports/
 	 */
+	/**
+	 * Removes stale export json files from the directories this run writes, so repeated exports
+	 * into the same destination never leave behind entities that no longer exist at the source.
+	 * Only the whitelisted entity-type directories are cleared; other content (e.g. report_designs,
+	 * which the export does not own) is left untouched.
+	 */
+	private void cleanExportDirectories(File destination, java.util.List<String> entityTypes) {
+		// Age groups are no longer exported as separate files (they are embedded in their age
+		// category), so their directory is cleared on every bulk export regardless of the requested
+		// types, removing files left by older module versions
+		java.util.LinkedHashSet<String> typesToClean = new java.util.LinkedHashSet<String>(entityTypes);
+		typesToClean.add("age-groups");
+		for (String entityType : typesToClean) {
+			if (!EXPORTABLE_ENTITY_TYPES.contains(entityType)) {
+				continue;
+			}
+			File dir = new File(destination, "configuration" + File.separator + "reportbuilder" + File.separator
+			        + entityType);
+			File[] staleFiles = dir.listFiles((d, name) -> name.endsWith(".json"));
+			if (staleFiles == null) {
+				continue;
+			}
+			for (File staleFile : staleFiles) {
+				if (!staleFile.delete()) {
+					log.warn("Could not remove stale export file: {}", staleFile.getAbsolutePath());
+				}
+			}
+		}
+	}
+	
+	/**
+	 * Records a per-item export failure so {@link ShippingResult} reflects partial failures instead
+	 * of reporting success while files were skipped.
+	 */
+	private void recordExportFailure(ShippingResult result, List<String> exportFailures, String entity, Exception e) {
+		log.error("Failed to export {}", entity, e);
+		exportFailures.add(entity + ": " + e.getMessage());
+	}
+	
 	private void createShippingDirectories(File destination) {
 		// Create the configuration directory structure
 		File configDir = new File(destination, "configuration");
@@ -4807,11 +4881,23 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	/**
 	 * Generate filename for export - uses code if available, falls back to UUID
 	 */
+	/**
+	 * Files already claimed during the current bulk export run, so entities sharing a code do not
+	 * silently overwrite each other's export file. Null outside a bulk run, leaving single-entity
+	 * exports with the plain code-based name.
+	 */
+	private static final ThreadLocal<java.util.Set<String>> CURRENT_EXPORT_FILENAMES = new ThreadLocal<>();
+
 	private String getFileNameForExport(String code, String uuid) {
-		if (code != null && !code.trim().isEmpty()) {
-			return code + ".json";
+		String filename = (code != null && !code.trim().isEmpty()) ? code + ".json" : uuid + ".json";
+		java.util.Set<String> claimed = CURRENT_EXPORT_FILENAMES.get();
+		if (claimed != null && !filename.equals(uuid + ".json")) {
+			if (!claimed.add(filename)) {
+				log.warn("Duplicate export code '{}' - using the uuid filename instead to avoid overwriting", code);
+				filename = uuid + ".json";
+			}
 		}
-		return uuid + ".json";
+		return filename;
 	}
 	
 	/**
@@ -4945,7 +5031,11 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				parentDir.mkdirs();
 			}
 			
-			objectMapper.writeValue(file, category);
+			// Age groups belong to their age category - embed them so no separate age-group files
+			// exist, and the import recreates the whole family from this one file
+			com.fasterxml.jackson.databind.node.ObjectNode node = objectMapper.valueToTree(category);
+			node.set("ageGroups", objectMapper.valueToTree(getAgeGroupsByCategoryUuid(category.getUuid(), null)));
+			objectMapper.writeValue(file, node);
 			log.debug("Exported age category: {}", file.getAbsolutePath());
 			return file;
 			
@@ -5072,7 +5162,84 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	/**
 	 * Import all entities of a specific type from a directory
 	 */
-	private void importType(String type, File dir, ImportResult result) {
+	/**
+	 * Builds a transaction template for a single import item. Each item commits or rolls back
+	 * independently: REQUIRES_NEW keeps item transactions isolated even when a caller of
+	 * {@link #importFromDirectory(File)} or {@link #importEntity(String, File)} already runs inside
+	 * one. Built per import run rather than cached, mirroring the per-call construction used by
+	 * metadatadeploy and atomfeed.
+	 */
+	private TransactionTemplate newImportTransactionTemplate() {
+		PlatformTransactionManager transactionManager = Context.getRegisteredComponent("transactionManager",
+		    PlatformTransactionManager.class);
+		TransactionTemplate template = new TransactionTemplate(transactionManager);
+		template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+		return template;
+	}
+	
+	/**
+	 * Builds a human-readable reason for an import failure. Walks to the root cause so wrapped
+	 * persistence exceptions report the underlying problem, and falls back to the exception type
+	 * and throw site when the message is empty (e.g. a NullPointerException).
+	 */
+	private String describeFailure(Throwable e) {
+		Throwable root = e;
+		while (root.getCause() != null && root.getCause() != root) {
+			root = root.getCause();
+		}
+		
+		String message = e.getMessage();
+		if (message == null || message.trim().isEmpty()) {
+			message = e.getClass().getSimpleName();
+			StackTraceElement top = root.getStackTrace().length > 0 ? root.getStackTrace()[0] : null;
+			if (top != null) {
+				message += " thrown at " + top;
+			}
+		} else if (root != e && root.getMessage() != null && !root.getMessage().trim().isEmpty()
+		        && !message.contains(root.getMessage())) {
+			message += " (caused by " + root.getClass().getSimpleName() + ": " + root.getMessage().trim() + ")";
+		}
+		
+		return message;
+	}
+	
+	/**
+	 * Clears the Hibernate session after a failed import item. Load-bearing rather than defensive:
+	 * on web requests OpenMRS pre-binds one session per request (OpenSessionInViewFilter) that
+	 * every per-item transaction reuses, so a failed item's pending writes would otherwise be
+	 * flushed and committed by the next item's transaction.
+	 */
+	private void clearSessionAfterFailure() {
+		try {
+			Context.clearSession();
+		}
+		catch (Exception e) {
+			log.debug("Could not clear session after a failed import item", e);
+		}
+	}
+	
+	/**
+	 * Resolves the code for a new entity from its file: the explicit code when present, otherwise
+	 * derived from the name and then the uuid, so package files without a code still import.
+	 */
+	private String deriveCode(JsonNode node) {
+		JsonNode code = node.get("code");
+		if (code != null && !code.isNull() && !code.asText().trim().isEmpty()) {
+			return code.asText().trim();
+		}
+		JsonNode name = node.get("name");
+		if (name != null && !name.isNull() && !name.asText().trim().isEmpty()) {
+			return name.asText().trim();
+		}
+		return node.get("uuid").asText();
+	}
+	
+	/**
+	 * Imports every entity file of one type directory. Each file is imported in its own transaction
+	 * via the given template; a failure is isolated to its file and reported in the result while
+	 * all other files continue.
+	 */
+	private void importType(String type, File dir, ImportResult result, TransactionTemplate template) {
 		File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
 
 		if (files == null || files.length == 0) {
@@ -5086,51 +5253,63 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			log.info("[IMPORT] Starting import: type={}, file={}", type, fileName);
 
 			try {
-				switch (type) {
-					case "categories":
-						importCategory(file);
-						break;
-					case "age-categories":
-						importAgeCategory(file);
-						break;
-					case "age-groups":
-						importAgeGroup(file);
-						break;
-					case "etl-sources":
-						importETLSource(file);
-						break;
-					case "etl-monitors":
-						importETLMonitor(file);
-						break;
-					case "indicators":
-						importIndicator(file);
-						break;
-					case "sections":
-						importSection(file);
-						break;
-					case "themes":
-						importTheme(file);
-						break;
-					case "reports":
-						importReport(file);
-						break;
-					case "dashboards":
-						importDashboard(file);
-						break;
-					case "library":
-						importLibraryEntry(file);
-						break;
-					default:
-						log.warn("Unknown import type: {}", type);
-						continue;
+				Boolean imported = template.execute(status -> {
+					try {
+						switch (type) {
+							case "categories":
+								importCategory(file);
+								break;
+							case "age-categories":
+								importAgeCategory(file);
+								break;
+							case "age-groups":
+								importAgeGroup(file);
+								break;
+							case "etl-sources":
+								importETLSource(file);
+								break;
+							case "etl-monitors":
+								importETLMonitor(file);
+								break;
+							case "indicators":
+								importIndicator(file);
+								break;
+							case "sections":
+								importSection(file);
+								break;
+							case "themes":
+								importTheme(file);
+								break;
+							case "reports":
+								importReport(file);
+								break;
+							case "dashboards":
+								importDashboard(file);
+								break;
+							case "library":
+								importLibraryEntry(file);
+								break;
+							default:
+								log.warn("Unknown import type: {}", type);
+								return false;
+						}
+						return true;
+					}
+					catch (IOException e) {
+						throw new UncheckedIOException(e);
+					}
+				});
+
+				if (Boolean.TRUE.equals(imported)) {
+					log.info("[IMPORT] Successfully imported: type={}, file={}", type, fileName);
+					result.addSuccess(type, fileName);
 				}
-				log.info("[IMPORT] Successfully imported: type={}, file={}", type, fileName);
-				result.addSuccess(type, fileName);
 
 			}
 			catch (Exception e) {
-				log.error("[IMPORT] Failed to import: type={}, file={}, error={}", type, fileName, e.getMessage(), e);
-				result.addError(type, fileName, e.getMessage());
+				log.error("[IMPORT] Failed to import: type={}, file={}, error={}", type, fileName, describeFailure(e), e);
+				result.addError(type, fileName, describeFailure(e));
+				clearSessionAfterFailure();
 			}
 		}
 	}
@@ -5286,6 +5465,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 							}
 							catch (Exception e) {
 								log.warn("Failed to read library file: {}", libraryFile.getName(), e);
+								clearSessionAfterFailure();
 							}
 						}
 					}
@@ -5302,6 +5482,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			}
 			catch (Exception e) {
 				log.error("Failed to import library dependency: {}", libraryUuid, e);
+				clearSessionAfterFailure();
 			}
 		}
 	}
@@ -5315,6 +5496,15 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		
 		String uuid = node.get("uuid").asText();
 		ReportLibrary existing = getReportLibraryByUuid(uuid);
+		
+		// The report save path auto-creates a library row per report under a fresh uuid - dedup by
+		// the owning report as well, or every builder-backed library file imports a duplicate
+		if (existing == null) {
+			String builderReportUuid = extractJsonStringField(node, "reportBuilderReportUuid");
+			if (builderReportUuid != null && !builderReportUuid.trim().isEmpty()) {
+				existing = dao.getReportLibraryByBuilderReportUuid(builderReportUuid);
+			}
+		}
 		
 		// Extract metaJson as JSON string (export uses camelCase)
 		String metaJson = null;
@@ -5331,7 +5521,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			
 			// Import code field
 			if (node.has("code") && !node.get("code").isNull()) {
-				existing.setCode(node.get("code").asText());
+				if (node.has("code") && !node.get("code").isNull()) {
+					existing.setCode(node.get("code").asText());
+				}
 			}
 			
 			// Import sourceType field
@@ -5504,7 +5696,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				existing.setDescription(node.get("description").asText());
 			}
-			existing.setCode(node.get("code").asText());
+			if (node.has("code") && !node.get("code").isNull()) {
+				existing.setCode(node.get("code").asText());
+			}
 			// Always set configJson (has default value from above)
 			existing.setConfigJson(configJson);
 			if (metaJson != null) {
@@ -5593,7 +5787,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				indicator.setDescription(node.get("description").asText());
 			}
-			indicator.setCode(node.get("code").asText());
+			indicator.setCode(deriveCode(node));
 			// Always set configJson (has default value from above)
 			indicator.setConfigJson(configJson);
 			if (metaJson != null) {
@@ -5736,7 +5930,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				existing.setDescription(node.get("description").asText());
 			}
-			existing.setCode(node.get("code").asText());
+			if (node.has("code") && !node.get("code").isNull()) {
+				existing.setCode(node.get("code").asText());
+			}
 			if (configJson != null) {
 				existing.setConfigJson(configJson);
 			}
@@ -5750,7 +5946,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				section.setDescription(node.get("description").asText());
 			}
-			section.setCode(node.get("code").asText());
+			section.setCode(deriveCode(node));
 			if (configJson != null) {
 				section.setConfigJson(configJson);
 			}
@@ -5768,11 +5964,11 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		String uuid = node.get("uuid").asText();
 		ReportBuilderDataTheme existing = getReportBuilderDataThemeByUuid(uuid);
 		
-		// Extract config_json as JSON string
-		String configJson = null;
-		if (node.has("config_json") && !node.get("config_json").isNull()) {
-			configJson = objectMapper.writeValueAsString(node.get("config_json"));
-		}
+		// Extract config/meta JSON strings (the export serializes entity beans in camelCase; older
+		// packages used the snake_case database-model names)
+		String configJson = extractJsonStringField(node, "config_json", "configJson");
+		String metaJson = extractJsonStringField(node, "meta_json", "metaJson");
+		String domain = extractJsonStringField(node, "domain");
 		
 		if (existing != null) {
 			// Update existing
@@ -5780,9 +5976,17 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				existing.setDescription(node.get("description").asText());
 			}
-			existing.setCode(node.get("code").asText());
+			if (node.has("code") && !node.get("code").isNull()) {
+				existing.setCode(node.get("code").asText());
+			}
+			if (domain != null) {
+				existing.setDomain(domain);
+			}
 			if (configJson != null) {
 				existing.setConfigJson(configJson);
+			}
+			if (metaJson != null) {
+				existing.setMetaJson(metaJson);
 			}
 			saveReportBuilderDataTheme(existing);
 			log.debug("Updated existing theme: {}", existing.getName());
@@ -5794,9 +5998,15 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				theme.setDescription(node.get("description").asText());
 			}
-			theme.setCode(node.get("code").asText());
+			theme.setCode(deriveCode(node));
+			if (domain != null) {
+				theme.setDomain(domain);
+			}
 			if (configJson != null) {
 				theme.setConfigJson(configJson);
+			}
+			if (metaJson != null) {
+				theme.setMetaJson(metaJson);
 			}
 			saveReportBuilderDataTheme(theme);
 			log.debug("Created new theme: {}", theme.getName());
@@ -5808,19 +6018,23 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 */
 	private void importAgeCategory(File file) throws IOException {
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
-		
+
 		String uuid = node.get("uuid").asText();
 		ReportBuilderAgeCategory existing = getAgeCategoryByUuid(uuid);
-		
+
+		ReportBuilderAgeCategory savedCategory;
 		if (existing != null) {
 			// Update existing
 			existing.setName(node.get("name").asText());
 			if (node.has("description") && !node.get("description").isNull()) {
 				existing.setDescription(node.get("description").asText());
 			}
-			existing.setCode(node.get("code").asText());
+			if (node.has("code") && !node.get("code").isNull()) {
+				existing.setCode(node.get("code").asText());
+			}
 			saveAgeCategory(existing);
 			log.debug("Updated existing age category: {}", existing.getName());
+			savedCategory = existing;
 		} else {
 			// Create new
 			ReportBuilderAgeCategory category = new ReportBuilderAgeCategory();
@@ -5829,9 +6043,19 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				category.setDescription(node.get("description").asText());
 			}
-			category.setCode(node.get("code").asText());
+			category.setCode(deriveCode(node));
 			saveAgeCategory(category);
 			log.debug("Created new age category: {}", category.getName());
+			savedCategory = category;
+		}
+
+		// Age groups belong to their age category - current exports embed them in the category file,
+		// and they are imported here in the same transaction so the family lands together
+		com.fasterxml.jackson.databind.JsonNode embeddedGroups = node.get("ageGroups");
+		if (embeddedGroups != null && embeddedGroups.isArray()) {
+			for (com.fasterxml.jackson.databind.JsonNode groupNode : embeddedGroups) {
+				upsertAgeGroup(savedCategory, groupNode);
+			}
 		}
 	}
 	
@@ -5839,22 +6063,105 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	 * Import a ReportBuilderAgeGroup entity Note: AgeGroups don't have UUID, use category + label
 	 * for deduplication
 	 */
+	/**
+	 * Imports one standalone age-group file. Only legacy packages carry separate age-group files -
+	 * current exports embed the groups in their age category, which {@link #importAgeCategory(File)}
+	 * imports together with them.
+	 */
 	private void importAgeGroup(File file) throws IOException {
-		// Note: Age groups are typically imported as part of age categories
-		// This method handles individual age group imports if needed
 		com.fasterxml.jackson.databind.JsonNode node = readEntityFile(file);
 		
-		// Look up the category by UUID - note: age groups don't have category_uuid in their JSON
-		// They reference the category through their parent relationship
-		// For simplicity, we'll extract min/max days and code from the node
-		String label = node.get("label").asText();
-		String code = node.get("code").asText();
-		int minAgeDays = node.get("min_age_days").asInt();
-		int maxAgeDays = node.get("max_age_days").asInt();
+		String code = extractJsonStringField(node, "code");
+		String label = extractJsonStringField(node, "label");
 		
-		// Since age groups don't have UUIDs and are category-dependent,
-		// we skip individual import and rely on category import
-		log.debug("Age group {} ({}) will be imported with its category", label, code);
+		// Resolve the parent category: the export writes the category as a uuid string (or a nested
+		// entity), older packages carry a category_uuid field
+		com.fasterxml.jackson.databind.JsonNode categoryRef = firstNonNullNode(node, "category_uuid", "categoryUuid");
+		if (categoryRef == null) {
+			com.fasterxml.jackson.databind.JsonNode nested = node.get("ageCategory");
+			if (nested != null && !nested.isNull()) {
+				if (nested.isObject()) {
+					categoryRef = firstNonNullNode(nested, "uuid");
+				} else if (nested.isTextual() && !nested.asText().trim().isEmpty()) {
+					categoryRef = nested;
+				}
+			}
+		}
+		ReportBuilderAgeCategory category = categoryRef != null ? getAgeCategoryByUuid(categoryRef.asText()) : null;
+		if (category == null) {
+			throw new APIException("Age group '" + (label != null ? label : code)
+			        + "' references an age category that has not been imported: "
+			        + (categoryRef != null ? categoryRef.asText() : "none"));
+		}
+		
+		upsertAgeGroup(category, node);
+	}
+	
+	/**
+	 * Creates or updates one age group of the given category from its serialized form. Age groups
+	 * have no uuid - dedup is by code, falling back to label, within the category.
+	 */
+	private void upsertAgeGroup(ReportBuilderAgeCategory category, com.fasterxml.jackson.databind.JsonNode node)
+	        throws IOException {
+		String code = extractJsonStringField(node, "code");
+		String label = extractJsonStringField(node, "label");
+		if (code == null && label == null) {
+			throw new APIException("Age group has neither code nor label");
+		}
+		
+		Integer minAgeDays = readIntField(node, "min_age_days", "minAgeDays");
+		Integer maxAgeDays = readIntField(node, "max_age_days", "maxAgeDays");
+		Integer sortOrder = readIntField(node, "sort_order", "sortOrder");
+		com.fasterxml.jackson.databind.JsonNode activeNode = firstNonNullNode(node, "active");
+		
+		ReportBuilderAgeGroup existing = null;
+		for (ReportBuilderAgeGroup group : getAgeGroupsByCategoryUuid(category.getUuid(), null)) {
+			if ((code != null && code.equals(group.getCode())) || (label != null && label.equals(group.getLabel()))) {
+				existing = group;
+				break;
+			}
+		}
+		
+		if (existing == null) {
+			ReportBuilderAgeGroup group = new ReportBuilderAgeGroup();
+			group.setAgeCategory(category);
+			group.setCode(code != null ? code : label);
+			group.setLabel(label != null ? label : code);
+			applyAgeGroupFields(group, minAgeDays, maxAgeDays, sortOrder != null ? sortOrder : Integer.valueOf(0),
+			    activeNode);
+			saveAgeGroup(group);
+			log.debug("Created new age group: {}", group.getLabel());
+		} else {
+			if (code != null) {
+				existing.setCode(code);
+			}
+			if (label != null) {
+				existing.setLabel(label);
+			}
+			applyAgeGroupFields(existing, minAgeDays, maxAgeDays, sortOrder, activeNode);
+			saveAgeGroup(existing);
+			log.debug("Updated existing age group: {}", existing.getLabel());
+		}
+	}
+	
+	/**
+	 * Applies the optional numeric/flag fields of an age group, preserving existing values when the
+	 * file omits them.
+	 */
+	private void applyAgeGroupFields(ReportBuilderAgeGroup group, Integer minAgeDays, Integer maxAgeDays, Integer sortOrder,
+	        com.fasterxml.jackson.databind.JsonNode activeNode) {
+		if (minAgeDays != null) {
+			group.setMinAgeDays(minAgeDays);
+		}
+		if (maxAgeDays != null) {
+			group.setMaxAgeDays(maxAgeDays);
+		}
+		if (sortOrder != null) {
+			group.setSortOrder(sortOrder);
+		}
+		if (activeNode != null) {
+			group.setActive(activeNode.asBoolean());
+		}
 	}
 	
 	/**
@@ -5872,7 +6179,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				existing.setDescription(node.get("description").asText());
 			}
-			existing.setCode(node.get("code").asText());
+			if (node.has("code") && !node.get("code").isNull()) {
+				existing.setCode(node.get("code").asText());
+			}
 			saveETLSource(existing);
 			log.debug("Updated existing ETL source: {}", existing.getName());
 		} else {
@@ -5883,7 +6192,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				source.setDescription(node.get("description").asText());
 			}
-			source.setCode(node.get("code").asText());
+			source.setCode(deriveCode(node));
 			saveETLSource(source);
 			log.debug("Created new ETL source: {}", source.getName());
 		}
@@ -5898,15 +6207,10 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		String uuid = node.get("uuid").asText();
 		ETLMonitor existing = getETLMonitorByUuid(uuid);
 		
-		// Extract config_json and display_config_json as JSON strings
-		String configJson = null;
-		String displayConfigJson = null;
-		if (node.has("config_json") && !node.get("config_json").isNull()) {
-			configJson = objectMapper.writeValueAsString(node.get("config_json"));
-		}
-		if (node.has("display_config_json") && !node.get("display_config_json").isNull()) {
-			displayConfigJson = objectMapper.writeValueAsString(node.get("display_config_json"));
-		}
+		// Extract config/display config JSON strings (the export serializes entity beans in
+		// camelCase; older packages used the snake_case database-model names)
+		String configJson = extractJsonStringField(node, "config_json", "configJson");
+		String displayConfigJson = extractJsonStringField(node, "display_config_json", "displayConfigJson");
 		
 		if (existing != null) {
 			// Update existing
@@ -5914,7 +6218,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				existing.setDescription(node.get("description").asText());
 			}
-			existing.setCode(node.get("code").asText());
+			if (node.has("code") && !node.get("code").isNull()) {
+				existing.setCode(node.get("code").asText());
+			}
 			if (configJson != null) {
 				existing.setConfigJson(configJson);
 			}
@@ -5931,7 +6237,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				monitor.setDescription(node.get("description").asText());
 			}
-			monitor.setCode(node.get("code").asText());
+			monitor.setCode(deriveCode(node));
 			if (configJson != null) {
 				monitor.setConfigJson(configJson);
 			}
@@ -5976,7 +6282,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				existing.setDescription(node.get("description").asText());
 			}
 			if (node.has("code") && !node.get("code").isNull()) {
-				existing.setCode(node.get("code").asText());
+				if (node.has("code") && !node.get("code").isNull()) {
+					existing.setCode(node.get("code").asText());
+				}
 			}
 			if (dashboardType != null) {
 				existing.setDashboardType(dashboardType);
@@ -6054,6 +6362,73 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	}
 	
 	/**
+	 * Returns the first present, non-null field among the given names, tolerating packages that
+	 * name fields in the snake_case database-model format or the camelCase entity-bean format.
+	 */
+	private com.fasterxml.jackson.databind.JsonNode firstNonNullNode(com.fasterxml.jackson.databind.JsonNode node,
+	        String... names) {
+		for (String name : names) {
+			com.fasterxml.jackson.databind.JsonNode field = node.get(name);
+			if (field != null && !field.isNull()) {
+				return field;
+			}
+		}
+		return null;
+	}
+	
+	/**
+	 * Resolves the category uuid of an exported report: an explicit category_uuid/categoryUuid
+	 * field, or the uuid of the nested category entity written by the export.
+	 */
+	private String resolveCategoryUuid(com.fasterxml.jackson.databind.JsonNode node) throws IOException {
+		com.fasterxml.jackson.databind.JsonNode ref = firstNonNullNode(node, "category_uuid", "categoryUuid");
+		if (ref == null) {
+			com.fasterxml.jackson.databind.JsonNode nested = node.get("category");
+			if (nested != null && nested.isObject()) {
+				return extractJsonStringField(nested, "uuid");
+			}
+			return null;
+		}
+		return ref.asText();
+	}
+	
+	/**
+	 * Applies the lastCompiledAt value, accepting either epoch millis (entity-bean export) or an
+	 * ISO 8601 timestamp (older packages).
+	 */
+	private void applyLastCompiledAt(ReportBuilderReport report, com.fasterxml.jackson.databind.JsonNode field) {
+		if (field == null) {
+			return;
+		}
+		try {
+			if (field.isNumber()) {
+				report.setLastCompiledAt(new java.util.Date(field.asLong()));
+			} else {
+				report.setLastCompiledAt(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss").parse(field.asText()));
+			}
+		}
+		catch (Exception e) {
+			log.warn("Invalid lastCompiledAt value: {}", field.asText());
+		}
+	}
+	
+	/**
+	 * Reads an integer field tolerating snake_case and camelCase names.
+	 */
+	private Integer readIntField(com.fasterxml.jackson.databind.JsonNode node, String... names) {
+		com.fasterxml.jackson.databind.JsonNode field = firstNonNullNode(node, names);
+		if (field == null) {
+			return null;
+		}
+		try {
+			return Integer.valueOf(field.asText().trim());
+		}
+		catch (NumberFormatException e) {
+			return null;
+		}
+	}
+	
+	/**
 	 * Import a ReportBuilderReport entity - reads database model format Enhanced to import all
 	 * fields that are exported
 	 */
@@ -6063,15 +6438,17 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 		String uuid = node.get("uuid").asText();
 		ReportBuilderReport existing = getReportBuilderReportByUuid(uuid);
 		
-		// Extract config_json and meta_json as JSON strings
-		String configJson = null;
-		String metaJson = null;
-		if (node.has("config_json") && !node.get("config_json").isNull()) {
-			configJson = objectMapper.writeValueAsString(node.get("config_json"));
-		}
-		if (node.has("meta_json") && !node.get("meta_json").isNull()) {
-			metaJson = objectMapper.writeValueAsString(node.get("meta_json"));
-		}
+		// Extract config/meta JSON strings (the export serializes entity beans in camelCase; older
+		// packages used the snake_case database-model names)
+		String configJson = extractJsonStringField(node, "config_json", "configJson");
+		String metaJson = extractJsonStringField(node, "meta_json", "metaJson");
+		String reportType = extractJsonStringField(node, "report_type", "reportType");
+		String compiledDefinitionUuid = extractJsonStringField(node, "compiled_report_definition_uuid",
+		    "compiledReportDefinitionUuid");
+		String compiledDesignUuid = extractJsonStringField(node, "compiled_report_design_uuid", "compiledReportDesignUuid");
+		String compileStatus = extractJsonStringField(node, "compile_status", "compileStatus");
+		String categoryUuid = resolveCategoryUuid(node);
+		com.fasterxml.jackson.databind.JsonNode lastCompiledAt = firstNonNullNode(node, "last_compiled_at", "lastCompiledAt");
 		
 		if (existing != null) {
 			// Update existing - all fields
@@ -6079,7 +6456,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				existing.setDescription(node.get("description").asText());
 			}
-			existing.setCode(node.get("code").asText());
+			if (node.has("code") && !node.get("code").isNull()) {
+				existing.setCode(node.get("code").asText());
+			}
 			if (configJson != null) {
 				existing.setConfigJson(configJson);
 			}
@@ -6087,51 +6466,34 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				existing.setMetaJson(metaJson);
 			}
 			
-			// Handle category reference via category_uuid
-			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
-				String categoryUuid = node.get("category_uuid").asText();
+			// Handle category reference
+			if (categoryUuid != null) {
 				ReportCategory category = getReportCategoryByUuid(categoryUuid);
 				if (category != null) {
 					existing.setCategory(category);
 				}
 			}
 			
-			// Handle report type
-			if (node.has("report_type") && !node.get("report_type").isNull()) {
-				existing.setReportType(node.get("report_type").asText());
+			if (reportType != null) {
+				existing.setReportType(reportType);
 			}
 			
-			// Import compiledReportDefinitionUuid field
-			if (node.has("compiled_report_definition_uuid") && !node.get("compiled_report_definition_uuid").isNull()) {
-				existing.setCompiledReportDefinitionUuid(node.get("compiled_report_definition_uuid").asText());
+			if (compiledDefinitionUuid != null) {
+				existing.setCompiledReportDefinitionUuid(compiledDefinitionUuid);
 			}
 			
-			// Import compiledReportDesignUuid field
-			if (node.has("compiled_report_design_uuid") && !node.get("compiled_report_design_uuid").isNull()) {
-				existing.setCompiledReportDesignUuid(node.get("compiled_report_design_uuid").asText());
+			if (compiledDesignUuid != null) {
+				existing.setCompiledReportDesignUuid(compiledDesignUuid);
 			}
 			
-			// Import lastCompiledAt field
-			if (node.has("last_compiled_at") && !node.get("last_compiled_at").isNull()) {
+			applyLastCompiledAt(existing, lastCompiledAt);
+			
+			if (compileStatus != null) {
 				try {
-					String timestamp = node.get("last_compiled_at").asText();
-					// Parse ISO 8601 timestamp
-					java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
-					existing.setLastCompiledAt(sdf.parse(timestamp));
-				}
-				catch (Exception e) {
-					log.warn("Invalid last_compiled_at value: {}", node.get("last_compiled_at").asText());
-				}
-			}
-			
-			// Import compileStatus field
-			if (node.has("compile_status") && !node.get("compile_status").isNull()) {
-				try {
-					existing.setCompileStatus(ReportBuilderReport.ReportCompileStatus.valueOf(node.get("compile_status")
-					        .asText()));
+					existing.setCompileStatus(ReportBuilderReport.ReportCompileStatus.valueOf(compileStatus));
 				}
 				catch (IllegalArgumentException e) {
-					log.warn("Invalid compile_status value: {}", node.get("compile_status").asText());
+					log.warn("Invalid compileStatus value: {}", compileStatus);
 				}
 			}
 			
@@ -6155,7 +6517,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 			if (node.has("description") && !node.get("description").isNull()) {
 				report.setDescription(node.get("description").asText());
 			}
-			report.setCode(node.get("code").asText());
+			report.setCode(deriveCode(node));
 			if (configJson != null) {
 				report.setConfigJson(configJson);
 			}
@@ -6163,51 +6525,34 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 				report.setMetaJson(metaJson);
 			}
 			
-			// Handle report type
-			if (node.has("report_type") && !node.get("report_type").isNull()) {
-				report.setReportType(node.get("report_type").asText());
+			if (reportType != null) {
+				report.setReportType(reportType);
 			}
 			
-			// Handle category reference via category_uuid
-			if (node.has("category_uuid") && !node.get("category_uuid").isNull()) {
-				String categoryUuid = node.get("category_uuid").asText();
+			// Handle category reference
+			if (categoryUuid != null) {
 				ReportCategory category = getReportCategoryByUuid(categoryUuid);
 				if (category != null) {
 					report.setCategory(category);
 				}
 			}
 			
-			// Import compiledReportDefinitionUuid field
-			if (node.has("compiled_report_definition_uuid") && !node.get("compiled_report_definition_uuid").isNull()) {
-				report.setCompiledReportDefinitionUuid(node.get("compiled_report_definition_uuid").asText());
+			if (compiledDefinitionUuid != null) {
+				report.setCompiledReportDefinitionUuid(compiledDefinitionUuid);
 			}
 			
-			// Import compiledReportDesignUuid field
-			if (node.has("compiled_report_design_uuid") && !node.get("compiled_report_design_uuid").isNull()) {
-				report.setCompiledReportDesignUuid(node.get("compiled_report_design_uuid").asText());
+			if (compiledDesignUuid != null) {
+				report.setCompiledReportDesignUuid(compiledDesignUuid);
 			}
 			
-			// Import lastCompiledAt field
-			if (node.has("last_compiled_at") && !node.get("last_compiled_at").isNull()) {
+			applyLastCompiledAt(report, lastCompiledAt);
+			
+			if (compileStatus != null) {
 				try {
-					String timestamp = node.get("last_compiled_at").asText();
-					// Parse ISO 8601 timestamp
-					java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss");
-					report.setLastCompiledAt(sdf.parse(timestamp));
-				}
-				catch (Exception e) {
-					log.warn("Invalid last_compiled_at value: {}", node.get("last_compiled_at").asText());
-				}
-			}
-			
-			// Import compileStatus field
-			if (node.has("compile_status") && !node.get("compile_status").isNull()) {
-				try {
-					report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.valueOf(node.get("compile_status")
-					        .asText()));
+					report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.valueOf(compileStatus));
 				}
 				catch (IllegalArgumentException e) {
-					log.warn("Invalid compile_status value: {}", node.get("compile_status").asText());
+					log.warn("Invalid compileStatus value: {}", compileStatus);
 				}
 			}
 			
