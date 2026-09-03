@@ -68,15 +68,24 @@ public class ETLMonitor extends BaseOpenmrsMetadata implements Serializable {
 	// ========================
 	
 	/**
-	 * Types of visual displays for the monitor
+	 * Types of visual displays for the monitor. Mirrors the frontend's monitor type union (see
+	 * etl-monitor.types.ts / design-registry.tsx): the v1 names remain for existing rows, the v2
+	 * component names match the frontend renderers.
 	 */
 	public enum MonitorType {
+		// Legacy v1 types - kept so existing monitor_type values in the database still load
 		STATUS_CARD, // Single status indicator
-		PROGRESS_BAR, // Progress percentage
-		DATA_TABLE, // Tabular data
+		PROGRESS_BAR, // Progress percentage (v1 name of PROGRESS)
+		DATA_TABLE, // Tabular data (v1 name of TABLE)
 		TIME_SERIES, // Chart/time series data
 		ERROR_LOG, // Error list
-		METRICS_GRID // KPI/metric cards
+		METRICS_GRID, // KPI/metric cards
+		// V2 component types
+		SUMMARY_CARD, // Stacked highlights with status badges
+		PROGRESS, // Progress percentage
+		TABLE, // Tabular data
+		DETAILS, // All available fields and properties
+		LOG // Event timeline
 	}
 	
 	// ========================
