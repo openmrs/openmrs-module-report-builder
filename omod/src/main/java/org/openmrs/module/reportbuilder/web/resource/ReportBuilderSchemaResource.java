@@ -13,7 +13,9 @@ import org.openmrs.module.webservices.rest.web.resource.impl.NeedsPaging;
 import org.openmrs.module.webservices.rest.web.response.ResponseException;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -33,11 +35,24 @@ public class ReportBuilderSchemaResource extends DelegatingCrudResource<ReportBu
 		
 		private String name;
 		
+		private Long rows; // approximate INFORMATION_SCHEMA count; null for views
+		
+		private Date updateTime; // last modification time; null when unknown
+		
+		private String tableType; // "BASE TABLE" or "VIEW"
+		
 		public ETLTableRef() {
 		}
 		
 		public ETLTableRef(String name) {
+			this(name, null, null, null);
+		}
+		
+		public ETLTableRef(String name, Long rows, Date updateTime, String tableType) {
 			this.name = name;
+			this.rows = rows;
+			this.updateTime = updateTime;
+			this.tableType = tableType;
 			this.uuid = UUID.nameUUIDFromBytes(("etl-table:" + name).getBytes()).toString();
 		}
 		
@@ -56,10 +71,80 @@ public class ReportBuilderSchemaResource extends DelegatingCrudResource<ReportBu
 		public void setName(String name) {
 			this.name = name;
 		}
+		
+		public Long getRows() {
+			return rows;
+		}
+		
+		public void setRows(Long rows) {
+			this.rows = rows;
+		}
+		
+		public Date getUpdateTime() {
+			return updateTime;
+		}
+		
+		public void setUpdateTime(Date updateTime) {
+			this.updateTime = updateTime;
+		}
+		
+		public String getTableType() {
+			return tableType;
+		}
+		
+		public void setTableType(String tableType) {
+			this.tableType = tableType;
+		}
 	}
 	
 	private ReportBuilderService service() {
 		return Context.getService(ReportBuilderService.class);
+	}
+	
+	/** Tolerates alias-case differences in the INFORMATION_SCHEMA result maps */
+	private static Object firstOf(Map row, String... keys) {
+		for (String key : keys) {
+			Object value = row.get(key);
+			if (value != null) {
+				return value;
+			}
+		}
+		// case-insensitive fallback
+		for (Object keyObj : row.keySet()) {
+			String key = String.valueOf(keyObj);
+			for (String wanted : keys) {
+				if (key.equalsIgnoreCase(wanted)) {
+					return row.get(keyObj);
+				}
+			}
+		}
+		return null;
+	}
+	
+	private static String toName(Map row) {
+		Object value = firstOf(row, "tableName", "TABLE_NAME");
+		return value == null ? null : String.valueOf(value);
+	}
+	
+	private static Long toRowCount(Map row) {
+		Object value = firstOf(row, "tableRows", "TABLE_ROWS");
+		if (value instanceof Number) {
+			return ((Number) value).longValue();
+		}
+		return null;
+	}
+	
+	private static Date toUpdateTime(Map row) {
+		Object value = firstOf(row, "updateTime", "UPDATE_TIME");
+		if (value instanceof Date) {
+			return (Date) value;
+		}
+		return null;
+	}
+	
+	private static String toTableType(Map row) {
+		Object value = firstOf(row, "tableType", "TABLE_TYPE");
+		return value == null ? null : String.valueOf(value);
 	}
 	
 	@Override
@@ -90,17 +175,21 @@ public class ReportBuilderSchemaResource extends DelegatingCrudResource<ReportBu
 	
 	@Override
 	public PageableResult doGetAll(RequestContext context) throws ResponseException {
-		
+
 		String q = context.getParameter("q"); // optional filter on table name
-		List<String> tables = service().getETLTables();
-		
+		List<Map> tables = service().getETLTables();
+
 		List<ETLTableRef> results = new ArrayList<>();
-		for (String t : tables) {
-			if (q == null || q.trim().isEmpty() || t.toLowerCase().contains(q.toLowerCase())) {
-				results.add(new ETLTableRef(t));
+		for (Map table : tables) {
+			String name = toName(table);
+			if (name == null) {
+				continue;
+			}
+			if (q == null || q.trim().isEmpty() || name.toLowerCase().contains(q.toLowerCase())) {
+				results.add(new ETLTableRef(name, toRowCount(table), toUpdateTime(table), toTableType(table)));
 			}
 		}
-		
+
 		return new NeedsPaging<>(results, context);
 	}
 	
@@ -115,6 +204,9 @@ public class ReportBuilderSchemaResource extends DelegatingCrudResource<ReportBu
 		DelegatingResourceDescription d = new DelegatingResourceDescription();
 		d.addProperty("uuid");
 		d.addProperty("name");
+		d.addProperty("rows");
+		d.addProperty("updateTime");
+		d.addProperty("tableType");
 		return d;
 	}
 	

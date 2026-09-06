@@ -4,6 +4,7 @@ import org.openmrs.Concept;
 import org.openmrs.EncounterType;
 import org.openmrs.api.APIAuthenticationException;
 import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import org.openmrs.api.ConceptService;
 import org.openmrs.api.EncounterService;
 import org.openmrs.module.reportbuilder.web.resources.mapper.ConceptMapper;
@@ -41,6 +42,7 @@ public class EncounterTypeConceptController {
     @ResponseBody
     public Object get(HttpServletRequest request, RequestContext context,
             @RequestParam(required = false, value = "encounterTypeUuid") String encounterTypeUuid) {
+        Context.requirePrivilege("Task: reportbuilder.report.view");
         try {
             List<ConceptMapper> conceptMapperList = new ArrayList<>();
 

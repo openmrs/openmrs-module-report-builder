@@ -3,6 +3,7 @@ package org.openmrs.module.reportbuilder.web.controller;
 import org.openmrs.Cohort;
 import org.openmrs.api.APIAuthenticationException;
 import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import org.openmrs.api.CohortService;
 import org.openmrs.module.webservices.rest.SimpleObject;
 import org.openmrs.module.webservices.rest.web.RequestContext;
@@ -38,6 +39,7 @@ public class ReportBuilderPatientSearchController {
 	@ResponseBody
 	public ResponseEntity<Object> getAll(HttpServletRequest request,
 	        @RequestParam(required = false, value = "includeVoided") boolean includeVoided) {
+		Context.requirePrivilege("Task: reportbuilder.dashboard.view");
 		try {
 			CohortService cohortService = Context.getCohortService();
 			List<SimpleObject> objects = new ArrayList<SimpleObject>();
@@ -76,6 +78,7 @@ public class ReportBuilderPatientSearchController {
 	@ResponseBody
 	public ResponseEntity<Object> getByUuid(HttpServletRequest request,
 	        @RequestParam(required = true, value = "uuid") String uuid) {
+		Context.requirePrivilege("Task: reportbuilder.dashboard.view");
 		try {
 			CohortService cohortService = Context.getCohortService();
 			Cohort cohort = cohortService.getCohortByUuid(uuid);
@@ -112,6 +115,7 @@ public class ReportBuilderPatientSearchController {
 	public ResponseEntity<Object> search(HttpServletRequest request,
 	        @RequestParam(required = true, value = "q") String query,
 	        @RequestParam(required = false, value = "includeVoided") boolean includeVoided) {
+		Context.requirePrivilege("Task: reportbuilder.dashboard.view");
 		try {
 			CohortService cohortService = Context.getCohortService();
 			List<SimpleObject> objects = new ArrayList<SimpleObject>();

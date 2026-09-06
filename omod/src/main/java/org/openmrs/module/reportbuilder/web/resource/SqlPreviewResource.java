@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.Map;
 
 import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import org.openmrs.module.reportbuilder.api.ReportBuilderService;
 import org.openmrs.module.reportbuilder.dto.SqlPreviewResult;
 import org.openmrs.module.reportbuilder.web.controller.dto.SqlPreviewRequest;
@@ -36,7 +37,7 @@ public class SqlPreviewResource extends DelegatingCrudResource<SqlPreviewRequest
 	
 	@Override
 	public SqlPreviewRequest save(SqlPreviewRequest delegate) {
-		Context.requirePrivilege("View Reports");
+		Context.requirePrivilege("Task: reportbuilder.sql.execute");
 		
 		Map<String, Object> params = delegate.getParams() != null ? delegate.getParams() : Collections
 		        .<String, Object> emptyMap();

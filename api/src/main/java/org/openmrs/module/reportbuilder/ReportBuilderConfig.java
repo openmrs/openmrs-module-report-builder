@@ -16,5 +16,4 @@ import org.springframework.stereotype.Component;
  */
 public class ReportBuilderConfig {
 	
-	public final static String MODULE_PRIVILEGE = "Report Builder Privilege";
 }

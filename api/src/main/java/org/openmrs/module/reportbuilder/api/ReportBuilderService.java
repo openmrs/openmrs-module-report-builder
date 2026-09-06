@@ -10,6 +10,8 @@
 package org.openmrs.module.reportbuilder.api;
 
 import org.openmrs.api.OpenmrsService;
+import org.openmrs.annotation.Authorized;
+import static org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges.*;
 import org.openmrs.module.reportbuilder.dto.SqlPreviewResult;
 import org.openmrs.module.reportbuilder.legacyconfig.importer.ReportImportResult;
 import org.openmrs.module.reportbuilder.model.*;
@@ -34,195 +36,253 @@ public interface ReportBuilderService extends OpenmrsService {
 	
 	/** Returns HTML as a string for preview/printing */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.run")
 	String renderHtmlFromJsonTemplate(ReportDesign reportDesign);
 	
 	/** Returns payload JSON as a string (no JsonNode leaks) */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.run")
 	String createPayloadJsonFromTemplate(ReportData reportData, ReportDesign reportDesign, String renderType,
 	        Map<String, Object> flatValues, String remapJsonOptional);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.run")
 	String buildPayloadJson(ReportData reportData, ReportDesign reportDesign, String renderType);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.run")
 	String buildFinalPayloadJson(ReportData reportData, ReportDesign reportDesign, String renderType, Date endDate);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.sql.execute")
 	String buildPreviewHtml(ReportData reportData, ReportDesign reportDesign);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.run")
 	String buildRenderedOutput(ReportData reportData, ReportDesign reportDesign, String remapJsonOptional);
 	
 	// =========================
 	// Indicator
 	// =========================
 	@Transactional
+	@Authorized({ "Task: reportbuilder.indicator.add", "Task: reportbuilder.indicator.edit" })
 	ReportBuilderIndicator saveReportBuilderIndicator(ReportBuilderIndicator indicator);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.indicator.view")
 	ReportBuilderIndicator getReportBuilderIndicatorById(Integer id);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.indicator.view")
 	ReportBuilderIndicator getReportBuilderIndicatorByUuid(String uuid);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.indicator.view")
 	ReportBuilderIndicator getReportBuilderIndicatorByCode(String code);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.indicator.view")
 	List<ReportBuilderIndicator> searchReportBuilderIndicators(String q, ReportBuilderIndicator.Kind kind,
 	        boolean includeRetired, Integer startIndex, Integer limit);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.indicator.view")
 	List<ReportBuilderIndicator> getAllReportBuilderIndicator(Integer startIndex, Integer limit);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.indicator.view")
 	List<ReportBuilderIndicator> getReportBuilderIndicators(ReportBuilderIndicator.Kind kind, boolean includeRetired,
 	        Integer startIndex, Integer limit);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.indicator.view")
 	long getReportBuilderIndicatorsCount(String q, ReportBuilderIndicator.Kind kind, boolean includeRetired);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.indicator.edit")
 	void retireReportBuilderIndicator(ReportBuilderIndicator indicator, String reason);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.indicator.edit")
 	void unretireReportBuilderIndicator(ReportBuilderIndicator indicator);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.indicator.purge")
 	void purgeReportBuilderIndicator(ReportBuilderIndicator indicator);
 	
 	// =========================
 	// Section
 	// =========================
 	@Transactional
+	@Authorized({ "Task: reportbuilder.section.add", "Task: reportbuilder.section.edit" })
 	ReportBuilderSection saveReportBuilderSection(ReportBuilderSection section);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.section.view")
 	ReportBuilderSection getReportBuilderSectionById(Integer id);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.section.view")
 	ReportBuilderSection getReportBuilderSectionByUuid(String uuid);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.section.view")
 	ReportBuilderSection getReportBuilderSectionByCode(String code);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.section.view")
 	List<ReportBuilderSection> getReportBuilderSections(String q, boolean includeRetired, Integer startIndex, Integer limit);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.section.view")
 	long getReportBuilderSectionsCount(String q, boolean includeRetired);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.section.edit")
 	void retireReportBuilderSection(ReportBuilderSection section, String reason);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.section.edit")
 	void unretireReportBuilderSection(ReportBuilderSection section);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.section.purge")
 	void purgeReportBuilderSection(ReportBuilderSection section);
 	
 	// =========================
 	// DataTheme
 	// =========================
 	@Transactional
+	@Authorized({ "Task: reportbuilder.theme.add", "Task: reportbuilder.theme.edit" })
 	ReportBuilderDataTheme saveReportBuilderDataTheme(ReportBuilderDataTheme theme);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.theme.view")
 	ReportBuilderDataTheme getReportBuilderDataThemeById(Integer id);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.theme.view")
 	ReportBuilderDataTheme getReportBuilderDataThemeByUuid(String uuid);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.theme.view")
 	ReportBuilderDataTheme getReportBuilderDataThemeByCode(String code);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.theme.view")
 	List<ReportBuilderDataTheme> getReportBuilderDataThemes(String q, boolean includeRetired, Integer startIndex,
 	        Integer limit);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.theme.view")
 	long getReportBuilderDataThemesCount(String q, boolean includeRetired);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.theme.edit")
 	void retireReportBuilderDataTheme(ReportBuilderDataTheme theme, String reason);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.theme.edit")
 	void unretireReportBuilderDataTheme(ReportBuilderDataTheme theme);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.theme.purge")
 	void purgeReportBuilderDataTheme(ReportBuilderDataTheme theme);
 	
 	@Transactional(readOnly = true)
-	List<String> getETLTables();
+	@Authorized("Task: reportbuilder.etlsource.view")
+	List<Map> getETLTables();
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlsource.view")
 	List<Map> getETLTableColumns(String tableName);
 	
 	// Categories
 	@Transactional
+	@Authorized({ "Task: reportbuilder.agegroup.add", "Task: reportbuilder.agegroup.edit" })
 	ReportBuilderAgeCategory saveAgeCategory(ReportBuilderAgeCategory category);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.agegroup.view")
 	ReportBuilderAgeCategory getAgeCategoryByUuid(String uuid);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.agegroup.view")
 	ReportBuilderAgeCategory getAgeCategoryByCode(String code);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.agegroup.view")
 	List<ReportBuilderAgeCategory> getAgeCategories(String q, boolean includeRetired, Boolean activeOnly,
 	        Integer startIndex, Integer limit);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.agegroup.view")
 	long getAgeCategoriesCount(String q, boolean includeRetired, Boolean activeOnly);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.agegroup.edit")
 	void retireAgeCategory(ReportBuilderAgeCategory category, String reason);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.agegroup.edit")
 	void unretireAgeCategory(ReportBuilderAgeCategory category);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.agegroup.purge")
 	void purgeAgeCategory(ReportBuilderAgeCategory category);
 	
 	// Groups
 	@Transactional
+	@Authorized({ "Task: reportbuilder.agegroup.add", "Task: reportbuilder.agegroup.edit" })
 	ReportBuilderAgeGroup saveAgeGroup(ReportBuilderAgeGroup group);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.agegroup.view")
 	ReportBuilderAgeGroup getAgeGroupById(Integer id);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.agegroup.view")
 	List<ReportBuilderAgeGroup> getAgeGroupsByCategoryUuid(String categoryUuid, Boolean activeOnly);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.agegroup.view")
 	List<ReportBuilderAgeGroup> getAgeGroupsByCategoryCode(String categoryCode, Boolean activeOnly);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.agegroup.purge")
 	void purgeAgeGroup(ReportBuilderAgeGroup group);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.agegroup.view")
 	List<ReportBuilderAgeGroup> getAgeGroups(String q, ReportBuilderAgeCategory category, Boolean activeOnly,
 	        Integer startIndex, Integer limit);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.sql.execute")
 	SqlPreviewResult previewSql(String sql, Map<String, Object> params, Integer maxRows);
 	
 	@Transactional
+	@Authorized({ "Task: reportbuilder.report.add", "Task: reportbuilder.report.edit" })
 	ReportBuilderReport saveReportBuilderReport(ReportBuilderReport report);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.view")
 	ReportBuilderReport getReportBuilderReportByUuid(String uuid);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.view")
 	List<ReportBuilderReport> getReportBuilderReports(String q, boolean includeRetired, Integer startIndex, Integer limit);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.report.edit")
 	void retireReportBuilderReport(ReportBuilderReport report, String reason);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.report.purge")
 	void purgeReportBuilderReport(ReportBuilderReport report);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.report.compile")
 	CompiledReportArtifacts compileReport(String reportBuilderReportUuid);
 	
 	/**
@@ -234,60 +294,78 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return CompiledReportArtifacts containing the compiled report and metadata
 	 */
 	@Transactional
+	@Authorized("Task: reportbuilder.report.compile")
 	CompiledReportArtifacts compileAndAddToLibrary(String reportBuilderReportUuid, String categoryUuid);
 	
 	@Transactional
+	@Authorized({ "Task: reportbuilder.category.add", "Task: reportbuilder.category.edit" })
 	ReportCategory saveReportCategory(ReportCategory category);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.category.view")
 	ReportCategory getReportCategoryById(Integer id);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.category.view")
 	ReportCategory getReportCategoryByUuid(String uuid);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.category.view")
 	List<ReportCategory> getReportCategories(String q, boolean includeRetired, Integer startIndex, Integer limit);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.category.view")
 	long getReportCategoriesCount(String q, boolean includeRetired);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.category.edit")
 	void retireReportCategory(ReportCategory category, String reason);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.category.edit")
 	void unretireReportCategory(ReportCategory category);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.category.purge")
 	void purgeReportCategory(ReportCategory category);
 	
 	@Transactional
+	@Authorized({ "Task: reportbuilder.library.add", "Task: reportbuilder.library.edit" })
 	ReportLibrary saveReportLibrary(ReportLibrary reportLibrary);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.library.view")
 	ReportLibrary getReportLibraryById(Integer id);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.library.view")
 	ReportLibrary getReportLibraryByUuid(String uuid);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.library.view")
 	List<ReportLibrary> getReportLibraries(String q, boolean includeRetired, Integer startIndex, Integer limit);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.library.view")
 	long getReportLibrariesCount(String q, boolean includeRetired);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.library.edit")
 	void retireReportLibrary(ReportLibrary reportLibrary, String reason);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.library.edit")
 	void unretireReportLibrary(ReportLibrary reportLibrary);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.library.purge")
 	void purgeReportLibrary(ReportLibrary reportLibrary);
 	
 	/**
 	 * Add a generic report to the report library
 	 */
 	@Transactional
+	@Authorized({ "Task: reportbuilder.library.add", "Task: reportbuilder.library.edit" })
 	void addGenericReportToLibrary(String reportDefinitionUuid, String name, String description, String code,
 	        ReportCategory category, ReportBuilderReport.ReportType reportType);
 	
@@ -297,24 +375,31 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return Number of entries cleaned up
 	 */
 	@Transactional
+	@Authorized("Task: reportbuilder.report.edit")
 	int cleanupBrokenReportReferences();
 	
 	@Transactional
+	@Authorized({ "Task: reportbuilder.etlsource.add", "Task: reportbuilder.etlsource.edit" })
 	ETLSource saveETLSource(ETLSource etlSource);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlsource.view")
 	ETLSource getETLSourceByUuid(String uuid);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlsource.view")
 	ETLSource getETLSourceById(Integer id);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlsource.view")
 	List<ETLSource> getAllETLSources(boolean includeRetired);
 	
 	@Transactional
+	@Authorized("Task: reportbuilder.etlsource.edit")
 	void retireETLSource(ETLSource etlSource, String retireReason);
 	
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.sql.execute")
 	List<String> getAllowedTablePrefixes();
 	
 	class CompiledReportArtifacts {
@@ -360,18 +445,25 @@ public interface ReportBuilderService extends OpenmrsService {
 		}
 	}
 	
+	@Authorized("Task: reportbuilder.package.import")
 	public ReportImportResult importLegacyReportPackage(File reportDir) throws Exception;
 	
+	@Authorized("Task: reportbuilder.package.import")
 	public List<ReportImportResult> importAllLegacyReportPackages(File legacyReportsRootDir) throws Exception;
 	
+	@Authorized("Task: reportbuilder.package.import")
 	public ReportImportResult validateLegacyReportPackage(File reportDir) throws Exception;
 	
+	@Authorized("Task: reportbuilder.package.import")
 	ReportImportResult importRuntimeLegacyReportPackage(String reportKey) throws Exception;
 	
+	@Authorized("Task: reportbuilder.package.import")
 	ReportImportResult validateRuntimeLegacyReportPackage(String reportKey) throws Exception;
 	
+	@Authorized("Task: reportbuilder.package.import")
 	List<ReportImportResult> importAllRuntimeLegacyReportPackages() throws Exception;
 	
+	@Authorized("Task: reportbuilder.package.import")
 	void ensureImportAllLegacyReportsTaskExists();
 	
 	// =========================
@@ -384,6 +476,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param jsonFile The JSON configuration file
 	 * @return OpenMRS ReportDefinition
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	org.openmrs.module.reporting.report.definition.ReportDefinition importReportFromFile(File jsonFile);
 	
 	/**
@@ -392,6 +485,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param jsonContent The JSON configuration
 	 * @return OpenMRS ReportDefinition
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	org.openmrs.module.reporting.report.definition.ReportDefinition importReportFromJson(String jsonContent);
 	
 	/**
@@ -400,6 +494,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param reportsDirectory Directory containing JSON report files
 	 * @return List of imported ReportDefinitions
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	List<org.openmrs.module.reporting.report.definition.ReportDefinition> importReportsFromDirectory(File reportsDirectory);
 	
 	/**
@@ -409,6 +504,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param javaClass The corresponding Java class
 	 * @return validation result with any discrepancies
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	org.openmrs.module.reportbuilder.legacyconfig.LegacyReportImporter.ValidationResult validateContract(File jsonFile,
 	        Class<?> javaClass);
 	
@@ -418,12 +514,14 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param legacyReportsPath Path to UgandaEMRReports legacy directory
 	 * @return List of imported ReportDefinitions
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	List<org.openmrs.module.reporting.report.definition.ReportDefinition> importUgandaEMRLegacyReports(
 	        String legacyReportsPath);
 	
 	/**
 	 * Ensure that all legacy reports are imported on module startup
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	void ensureLegacyReportsImported();
 	
 	// =========================
@@ -435,6 +533,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * 
 	 * @return List of import results
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	List<org.openmrs.module.reportbuilder.legacyconfig.generic.ReportImportResult> importAllGenericReports();
 	
 	/**
@@ -443,6 +542,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param jsonFile The JSON file to import
 	 * @return Import result
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	org.openmrs.module.reportbuilder.legacyconfig.generic.ReportImportResult importGenericReportFromFile(File jsonFile);
 	
 	/**
@@ -450,11 +550,13 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * 
 	 * @return true if reports are already imported
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	boolean areGenericReportsAlreadyImported();
 	
 	/**
 	 * Ensure generic reports import task exists
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	void ensureImportAllGenericReportsTaskExists();
 	
 	// =========================================================
@@ -466,6 +568,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * 
 	 * @return list of all legacy reports
 	 */
+	@Authorized("Task: reportbuilder.report.view")
 	List<LegacyReportConfig> getAllLegacyReports();
 	
 	/**
@@ -474,6 +577,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param uuid the UUID of the report
 	 * @return the legacy report, or null if not found
 	 */
+	@Authorized("Task: reportbuilder.report.view")
 	LegacyReportConfig getLegacyReportByUuid(String uuid);
 	
 	/**
@@ -482,6 +586,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param name the name of the report
 	 * @return the legacy report, or null if not found
 	 */
+	@Authorized("Task: reportbuilder.report.view")
 	LegacyReportConfig getLegacyReportByName(String name);
 	
 	/**
@@ -490,6 +595,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param config the report configuration to create
 	 * @return the created report configuration
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	LegacyReportConfig createLegacyReport(LegacyReportConfig config);
 	
 	/**
@@ -499,6 +605,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param config the updated report configuration
 	 * @return the updated report configuration
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	LegacyReportConfig updateLegacyReport(String uuid, LegacyReportConfig config);
 	
 	/**
@@ -506,6 +613,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * 
 	 * @param uuid the UUID of the report to delete
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	void deleteLegacyReport(String uuid);
 	
 	/**
@@ -514,6 +622,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param config the report configuration to validate
 	 * @return validation result with errors and warnings
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	ReportValidationResult validateLegacyReport(LegacyReportConfig config);
 	
 	/**
@@ -522,6 +631,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param category the category to filter by
 	 * @return list of legacy reports in the category
 	 */
+	@Authorized("Task: reportbuilder.report.view")
 	List<LegacyReportConfig> getLegacyReportsByCategory(String category);
 	
 	/**
@@ -530,6 +640,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param status the status to filter by
 	 * @return list of legacy reports with the status
 	 */
+	@Authorized("Task: reportbuilder.report.view")
 	List<LegacyReportConfig> getLegacyReportsByStatus(String status);
 	
 	/**
@@ -538,6 +649,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param query the search query
 	 * @return list of matching legacy reports
 	 */
+	@Authorized("Task: reportbuilder.report.view")
 	List<LegacyReportConfig> searchLegacyReports(String query);
 	
 	/**
@@ -545,6 +657,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * 
 	 * @return the count of legacy reports
 	 */
+	@Authorized("Task: reportbuilder.report.view")
 	int getLegacyReportCount();
 	
 	// =========================================================
@@ -558,6 +671,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the saved monitor
 	 */
 	@Transactional
+	@Authorized({ "Task: reportbuilder.etlmonitor.add", "Task: reportbuilder.etlmonitor.edit" })
 	ETLMonitor saveETLMonitor(ETLMonitor monitor);
 	
 	/**
@@ -567,6 +681,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the monitor, or null if not found
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlmonitor.view")
 	ETLMonitor getETLMonitorById(Integer id);
 	
 	/**
@@ -576,6 +691,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the monitor, or null if not found
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlmonitor.view")
 	ETLMonitor getETLMonitorByUuid(String uuid);
 	
 	/**
@@ -585,6 +701,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the monitor, or null if not found
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlmonitor.view")
 	ETLMonitor getETLMonitorByCode(String code);
 	
 	/**
@@ -597,6 +714,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return list of monitors
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlmonitor.view")
 	List<ETLMonitor> getETLMonitors(String q, boolean includeRetired, Integer startIndex, Integer limit);
 	
 	/**
@@ -605,6 +723,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return list of active monitors
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlmonitor.view")
 	List<ETLMonitor> getActiveETLMonitors();
 	
 	/**
@@ -615,6 +734,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return list of monitors in the category
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlmonitor.view")
 	List<ETLMonitor> getETLMonitorsByCategory(String category, boolean includeRetired);
 	
 	/**
@@ -625,6 +745,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the count of monitors
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.etlmonitor.view")
 	long getETLMonitorsCount(String q, boolean includeRetired);
 	
 	/**
@@ -634,6 +755,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param reason the reason for retiring
 	 */
 	@Transactional
+	@Authorized("Task: reportbuilder.etlmonitor.edit")
 	void retireETLMonitor(ETLMonitor monitor, String reason);
 	
 	/**
@@ -642,6 +764,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param monitor the monitor to unretire
 	 */
 	@Transactional
+	@Authorized("Task: reportbuilder.etlmonitor.edit")
 	void unretireETLMonitor(ETLMonitor monitor);
 	
 	/**
@@ -650,6 +773,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param monitor the monitor to purge
 	 */
 	@Transactional
+	@Authorized("Task: reportbuilder.etlmonitor.purge")
 	void purgeETLMonitor(ETLMonitor monitor);
 	
 	// =========================================================
@@ -663,6 +787,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the saved dashboard
 	 */
 	@Transactional
+	@Authorized({ "Task: reportbuilder.dashboard.add", "Task: reportbuilder.dashboard.edit" })
 	ReportBuilderDashboard saveReportBuilderDashboard(ReportBuilderDashboard dashboard);
 	
 	/**
@@ -672,6 +797,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the dashboard, or null if not found
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.dashboard.view")
 	ReportBuilderDashboard getReportBuilderDashboardById(Integer id);
 	
 	/**
@@ -681,6 +807,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the dashboard, or null if not found
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.dashboard.view")
 	ReportBuilderDashboard getReportBuilderDashboardByUuid(String uuid);
 	
 	/**
@@ -690,6 +817,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the dashboard, or null if not found
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.dashboard.view")
 	ReportBuilderDashboard getReportBuilderDashboardByCode(String code);
 	
 	/**
@@ -702,6 +830,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return list of dashboards
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.dashboard.view")
 	List<ReportBuilderDashboard> getReportBuilderDashboards(String q, boolean includeRetired, Integer startIndex,
 	        Integer limit);
 	
@@ -711,6 +840,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return list of active dashboards
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.dashboard.view")
 	List<ReportBuilderDashboard> getActiveReportBuilderDashboards();
 	
 	/**
@@ -721,6 +851,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return list of dashboards of the given type, or empty if the type is unknown
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.dashboard.view")
 	List<ReportBuilderDashboard> getReportBuilderDashboardsByType(String dashboardType, boolean includeRetired);
 	
 	/**
@@ -731,6 +862,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @return the count of dashboards
 	 */
 	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.dashboard.view")
 	long getReportBuilderDashboardsCount(String q, boolean includeRetired);
 	
 	/**
@@ -740,6 +872,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param reason the reason for retiring
 	 */
 	@Transactional
+	@Authorized("Task: reportbuilder.dashboard.edit")
 	void retireReportBuilderDashboard(ReportBuilderDashboard dashboard, String reason);
 	
 	/**
@@ -748,6 +881,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param dashboard the dashboard to unretire
 	 */
 	@Transactional
+	@Authorized("Task: reportbuilder.dashboard.edit")
 	void unretireReportBuilderDashboard(ReportBuilderDashboard dashboard);
 	
 	/**
@@ -756,6 +890,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param dashboard the dashboard to purge
 	 */
 	@Transactional
+	@Authorized("Task: reportbuilder.dashboard.purge")
 	void purgeReportBuilderDashboard(ReportBuilderDashboard dashboard);
 	
 	// ========== Report Shipping Methods ==========
@@ -769,6 +904,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param destination Destination directory for the exported files
 	 * @return ShippingResult containing details of the shipped report and dependencies
 	 */
+	@Authorized("Task: reportbuilder.package.export")
 	org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipReport(String reportUuid, String version,
 	        File destination);
 	
@@ -780,6 +916,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param destination Destination directory for the exported files
 	 * @return ShippingResult containing aggregated details
 	 */
+	@Authorized("Task: reportbuilder.package.export")
 	org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipBatch(List<String> reportUuids, String version,
 	        File destination);
 	
@@ -790,6 +927,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param destination Destination directory for the exported file
 	 * @return File containing the exported compiled report
 	 */
+	@Authorized("Task: reportbuilder.package.export")
 	java.io.File exportCompiledReport(String reportUuid, java.io.File destination);
 	
 	/**
@@ -800,6 +938,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param destination Destination directory for the exported file
 	 * @return File containing the exported entity
 	 */
+	@Authorized("Task: reportbuilder.package.export")
 	File exportEntity(String entityType, String entityUuid, File destination);
 	
 	/**
@@ -807,6 +946,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * 
 	 * @return Default shipping destination directory
 	 */
+	@Authorized("Task: reportbuilder.package.export")
 	File getDefaultShippingDirectory();
 	
 	/**
@@ -815,6 +955,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * 
 	 * @return Default import source directory
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	File getDefaultImportDirectory();
 	
 	/**
@@ -824,6 +965,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param destination Destination directory for the exported files
 	 * @return ShippingResult containing aggregated details
 	 */
+	@Authorized("Task: reportbuilder.package.export")
 	org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipAllReports(String version, File destination);
 	
 	/**
@@ -834,6 +976,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param destination Destination directory for the exported files
 	 * @return ShippingResult containing aggregated details
 	 */
+	@Authorized("Task: reportbuilder.package.export")
 	org.openmrs.module.reportbuilder.web.controller.dto.ShippingResult shipAllEntities(java.util.List<String> entityTypes,
 	        String version, File destination);
 	
@@ -845,6 +988,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param sourceDir Source directory containing the distribution package
 	 * @return ImportResult containing summary, successes, and errors
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	org.openmrs.module.reportbuilder.web.controller.dto.ImportResult importFromDirectory(File sourceDir);
 	
 	/**
@@ -854,6 +998,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param file File containing the entity definition
 	 * @return ImportResult for this single import operation
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	org.openmrs.module.reportbuilder.web.controller.dto.ImportResult importEntity(String entityType, File file);
 	
 	/**
@@ -862,6 +1007,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param sourceDir Source directory to validate
 	 * @return true if package is valid, false otherwise
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	boolean validatePackage(File sourceDir);
 	
 	/**
@@ -869,6 +1015,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * 
 	 * @return List of entity types in import order
 	 */
+	@Authorized("Task: reportbuilder.package.import")
 	java.util.List<String> getImportOrder();
 	
 	// ========== Serialized Report Import Methods ==========
@@ -883,6 +1030,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param categoryUuid The UUID of the category to add the report to (can be null)
 	 * @return CompiledReportArtifacts containing the imported report and metadata
 	 */
+	@Authorized("Task: reportbuilder.report.compile")
 	CompiledReportArtifacts importSerializedReport(java.io.File reportFile, String categoryUuid);
 	
 	/**
@@ -893,6 +1041,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param categoryUuid The UUID of the category to add the report to (can be null)
 	 * @return CompiledReportArtifacts containing the imported report and metadata
 	 */
+	@Authorized("Task: reportbuilder.report.compile")
 	CompiledReportArtifacts importSerializedReportFromObject(SerializedReport serializedReport, String categoryUuid);
 	
 	/**
@@ -902,6 +1051,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * 
 	 * @param reportBuilderReportUuid the builder report to sync into the library
 	 */
+	@Authorized({ "Task: reportbuilder.library.add", "Task: reportbuilder.library.edit" })
 	void saveOrUpdateLibraryEntry(String reportBuilderReportUuid);
 	
 	// ========== Report Package Methods ==========
@@ -915,6 +1065,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param limit Maximum number of results to return
 	 * @return List of package information for available packages
 	 */
+	@Authorized("Task: reportbuilder.package.export")
 	java.util.List<org.openmrs.module.reportbuilder.web.controller.dto.PackageInfo> getAvailablePackages(String search,
 	        String status, Integer startIndex, Integer limit);
 	
@@ -925,6 +1076,7 @@ public interface ReportBuilderService extends OpenmrsService {
 	 * @param status Optional status filter ("valid" or "invalid")
 	 * @return Total count of matching packages
 	 */
+	@Authorized("Task: reportbuilder.package.export")
 	long getAvailablePackagesCount(String search, String status);
 	
 }

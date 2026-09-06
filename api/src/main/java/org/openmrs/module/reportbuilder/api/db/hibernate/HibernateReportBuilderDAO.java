@@ -474,15 +474,17 @@ public class HibernateReportBuilderDAO implements ReportBuilderDAO {
 	// =========================================================
 	
 	@SuppressWarnings("unchecked")
-	public List<String> getETLTables(List<String> allowedPrefixes) {
+	public List<Map> getETLTables(List<String> allowedPrefixes) {
 		
 		if (allowedPrefixes == null || allowedPrefixes.isEmpty()) {
 			return Collections.emptyList();
 		}
 		
 		StringBuilder sql = new StringBuilder();
-		sql.append("select t.TABLE_NAME ").append("from INFORMATION_SCHEMA.TABLES t ")
-		        .append("where t.TABLE_SCHEMA = database() ").append("and t.TABLE_TYPE in ('BASE TABLE','VIEW') ");
+		sql.append("select t.TABLE_NAME AS tableName, t.TABLE_ROWS AS tableRows, ")
+		        .append("t.UPDATE_TIME AS updateTime, t.TABLE_TYPE AS tableType ")
+		        .append("from INFORMATION_SCHEMA.TABLES t ").append("where t.TABLE_SCHEMA = database() ")
+		        .append("and t.TABLE_TYPE in ('BASE TABLE','VIEW') ");
 		
 		// Build dynamic LIKE conditions
 		sql.append("and (");
@@ -510,7 +512,10 @@ public class HibernateReportBuilderDAO implements ReportBuilderDAO {
 			q.setString("prefix" + i, prefix + "%");
 		}
 		
-		return (List<String>) q.list();
+		// This makes q.list() return List<Map> keyed by the lowercase aliases
+		q.setResultTransformer(Transformers.ALIAS_TO_ENTITY_MAP);
+		
+		return (List<Map>) q.list();
 	}
 	
 	@SuppressWarnings({ "unchecked", "deprecation" })

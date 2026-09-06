@@ -1,6 +1,7 @@
 package org.openmrs.module.reportbuilder.web.controller;
 
 import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import org.openmrs.module.reporting.common.DateUtil;
 import org.openmrs.module.reporting.dataset.DataSet;
 import org.openmrs.module.reporting.dataset.DataSetRow;
@@ -62,6 +63,7 @@ public class EvaluateReportController {
 	        @RequestParam(required = false, value = "uuid") String directUuid,
 	        @RequestParam(required = false, value = "reportLibraryUuid") String reportLibraryUuid,
 	        @RequestParam(required = false, value = "renderType") String renderType) {
+		Context.requirePrivilege("Task: reportbuilder.report.run");
 		try {
 			String normalizedRenderType = normalizeRenderType(renderType);
 			

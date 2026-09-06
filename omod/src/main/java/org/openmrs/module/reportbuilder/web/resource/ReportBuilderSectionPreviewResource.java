@@ -3,6 +3,7 @@ package org.openmrs.module.reportbuilder.web.resource;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import org.openmrs.module.reportbuilder.api.ReportBuilderService;
 import org.openmrs.module.reportbuilder.dto.SqlPreviewResult;
 import org.openmrs.module.reportbuilder.model.ReportBuilderSection;
@@ -86,7 +87,7 @@ public class ReportBuilderSectionPreviewResource extends DelegatingCrudResource<
 	
 	@Override
 	public Object create(SimpleObject post, RequestContext context) throws ResponseException {
-		Context.requirePrivilege("View Reports");
+		Context.requirePrivilege("Task: reportbuilder.sql.execute");
 		
 		String sectionUuid = value(post, "sectionUuid");
 		String indicatorUuid = value(post, "indicatorUuid");

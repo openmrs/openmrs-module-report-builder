@@ -8,6 +8,7 @@ import org.openmrs.api.CohortService;
 import org.openmrs.api.ConceptService;
 import org.openmrs.api.PatientService;
 import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import org.openmrs.module.reporting.common.DateUtil;
 import org.openmrs.module.reporting.common.ReflectionUtil;
 import org.openmrs.module.reporting.cohort.EvaluatedCohort;
@@ -85,6 +86,7 @@ public class DataExportController {
 	@RequestMapping(method = RequestMethod.POST, consumes = "application/json")
 	@ResponseBody
 	public Object exportData(@RequestBody DataExportMapper payload, RequestContext requestContext) {
+		Context.requirePrivilege("Task: reportbuilder.report.run");
 		
 		org.openmrs.module.reportbuilder.web.resources.mapper.Cohort reportCohort = payload.getCohort();
 		List<Column> columnList = payload.getColumns();
@@ -177,6 +179,7 @@ public class DataExportController {
 	@RequestMapping(method = RequestMethod.POST, consumes = "application/json", params = "format=json")
 	@ResponseBody
 	public Object exportDataAsJson(@RequestBody DataExportMapper payload, RequestContext requestContext) {
+		Context.requirePrivilege("Task: reportbuilder.report.run");
 		
 		org.openmrs.module.reportbuilder.web.resources.mapper.Cohort reportCohort = payload.getCohort();
 		List<Column> columnList = payload.getColumns();

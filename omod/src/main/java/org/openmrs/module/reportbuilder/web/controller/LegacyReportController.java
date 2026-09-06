@@ -1,5 +1,7 @@
 package org.openmrs.module.reportbuilder.web.controller;
 
+import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.openmrs.api.APIException;
 import org.openmrs.module.reportbuilder.api.ReportBuilderService;
@@ -43,6 +45,7 @@ public class LegacyReportController extends BaseRestController {
 	@RequestMapping(method = RequestMethod.GET)
 	@ResponseBody
 	public SimpleObject listLegacyReports() {
+		Context.requirePrivilege("Task: reportbuilder.report.view");
 		SimpleObject response = new SimpleObject();
 		try {
 			List<LegacyReportConfig> reports = reportBuilderService.getAllLegacyReports();
@@ -79,6 +82,7 @@ public class LegacyReportController extends BaseRestController {
 	@RequestMapping(value = "/{uuid}", method = RequestMethod.GET)
 	@ResponseBody
 	public SimpleObject getLegacyReport(@PathVariable("uuid") String uuid) {
+		Context.requirePrivilege("Task: reportbuilder.report.view");
 		SimpleObject response = new SimpleObject();
 		try {
 			LegacyReportConfig report = reportBuilderService.getLegacyReportByUuid(uuid);
@@ -143,6 +147,7 @@ public class LegacyReportController extends BaseRestController {
 	@RequestMapping(method = RequestMethod.POST)
 	@ResponseBody
 	public SimpleObject createLegacyReport(@RequestBody Map<String, Object> payload) {
+		Context.requirePrivilege("Task: reportbuilder.package.import");
 		SimpleObject response = new SimpleObject();
 		
 		try {
@@ -177,6 +182,7 @@ public class LegacyReportController extends BaseRestController {
 	@RequestMapping(value = "/{uuid}", method = RequestMethod.POST)
 	@ResponseBody
 	public SimpleObject updateLegacyReport(@PathVariable("uuid") String uuid, @RequestBody Map<String, Object> payload) {
+		Context.requirePrivilege("Task: reportbuilder.package.import");
 		SimpleObject response = new SimpleObject();
 		
 		try {
@@ -211,6 +217,7 @@ public class LegacyReportController extends BaseRestController {
 	@RequestMapping(value = "/{uuid}", method = RequestMethod.DELETE)
 	@ResponseBody
 	public SimpleObject deleteLegacyReport(@PathVariable("uuid") String uuid) {
+		Context.requirePrivilege("Task: reportbuilder.package.import");
 		SimpleObject response = new SimpleObject();
 		
 		try {
@@ -238,6 +245,7 @@ public class LegacyReportController extends BaseRestController {
 	@RequestMapping(value = "/upload", method = RequestMethod.POST)
 	@ResponseBody
 	public SimpleObject uploadLegacyReport(@RequestParam("file") MultipartFile file) {
+		Context.requirePrivilege("Task: reportbuilder.package.import");
 		SimpleObject response = new SimpleObject();
 		
 		if (file.isEmpty()) {
@@ -304,6 +312,7 @@ public class LegacyReportController extends BaseRestController {
 	@RequestMapping(value = "/import", method = RequestMethod.POST)
 	@ResponseBody
 	public SimpleObject importLegacyReport(@RequestBody Map<String, Object> payload) {
+		Context.requirePrivilege("Task: reportbuilder.package.import");
 		SimpleObject response = new SimpleObject();
 		
 		try {
@@ -350,6 +359,7 @@ public class LegacyReportController extends BaseRestController {
 	@RequestMapping(value = "/validate", method = RequestMethod.POST)
 	@ResponseBody
 	public SimpleObject validateLegacyReport(@RequestBody Map<String, Object> payload) {
+		Context.requirePrivilege("Task: reportbuilder.package.import");
 		SimpleObject response = new SimpleObject();
 		
 		try {

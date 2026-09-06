@@ -102,7 +102,15 @@ public interface ReportBuilderDAO {
 	
 	void purgeAgeGroup(ReportBuilderAgeGroup group);
 	
-	List<String> getETLTables(List<String> allowedPrefixes);
+	/**
+	 * Lists ETL tables (BASE TABLE and VIEW) in the current database whose names start with any of
+	 * the given prefixes.
+	 * 
+	 * @return list of maps with keys: tableName (String, never null), tableRows (Number,
+	 *         approximate InnoDB estimate, null for views), updateTime (java.util.Date, null when
+	 *         unknown), tableType ("BASE TABLE" or "VIEW")
+	 */
+	List<Map> getETLTables(List<String> allowedPrefixes);
 	
 	List<Map> getETLTableColumns(String tableName);
 	

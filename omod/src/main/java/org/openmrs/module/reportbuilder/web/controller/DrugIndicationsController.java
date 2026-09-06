@@ -4,6 +4,7 @@ import org.openmrs.Concept;
 import org.openmrs.OrderType;
 import org.openmrs.api.APIAuthenticationException;
 import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import org.openmrs.api.ConceptService;
 import org.openmrs.module.reportbuilder.web.resources.mapper.ConceptMapper;
 import org.openmrs.module.webservices.rest.web.RequestContext;
@@ -40,6 +41,7 @@ public class DrugIndicationsController {
     @ResponseBody
     public Object get(HttpServletRequest request, RequestContext context,
             @RequestParam(required = true, value = "uuid") String uuid) {
+        Context.requirePrivilege("Task: reportbuilder.report.view");
         try {
             OrderType orderType = Context.getOrderService().getOrderTypeByUuid(uuid);
 

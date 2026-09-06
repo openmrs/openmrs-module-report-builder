@@ -294,6 +294,172 @@ Then deploy the built module artifact into your OpenMRS modules directory or run
 
 for module integration tests in OpenMRS.
 
+## Security: Privileges & Roles
+
+This module ships its own security model: **46 privileges** in the OpenMRS
+`Task: reportbuilder.<domain>.<action>` convention, bundled into **5 ready-made roles**,
+enforced on every API path (REST resources, controllers and scheduled tasks).
+
+This page tells implementers and site administrators everything needed to consume them
+in their own content packs.
+
+### How it works
+
+1. **Definition** — privileges and roles are declared in the module's initializer
+   configuration: `omod/src/main/resources/configuration/privileges/reportbuilder-privileges.csv`
+   and `configuration/roles/reportbuilder-roles.csv` (shipped inside the OMOD).
+   The Java counterparts live in
+   `api/src/main/java/org/openmrs/module/reportbuilder/security/ReportBuilderPrivileges.java`.
+2. **Provisioning** — at startup the [initializer](https://github.com/openmrs/openmrs-module-initializer)
+   module (2.9.0+) loads both CSVs and creates the privileges and roles.
+3. **Enforcement** — every `ReportBuilderService` method is annotated `@Authorized(...)`;
+   core's authorization interceptor rejects any caller whose roles don't carry the required
+   privilege. Controllers that bypass the service (report download, data export, patient
+   search, package validation) call `Context.requirePrivilege(...)` directly.
+
+### Privilege catalog
+
+| Privilege | Grants |
+|---|---|
+| `Task: reportbuilder.report.view` | View report definitions (Report Builder) |
+| `Task: reportbuilder.report.add` | Create report definitions (Report Builder) |
+| `Task: reportbuilder.report.edit` | Edit report definitions (Report Builder) |
+| `Task: reportbuilder.report.purge` | Delete report definitions (Report Builder) |
+| `Task: reportbuilder.indicator.view` | View SQL indicators (Report Builder) |
+| `Task: reportbuilder.indicator.add` | Create SQL indicators (Report Builder) |
+| `Task: reportbuilder.indicator.edit` | Edit SQL indicators (Report Builder) |
+| `Task: reportbuilder.indicator.purge` | Delete SQL indicators (Report Builder) |
+| `Task: reportbuilder.section.view` | View report sections (Report Builder) |
+| `Task: reportbuilder.section.add` | Create report sections (Report Builder) |
+| `Task: reportbuilder.section.edit` | Edit report sections (Report Builder) |
+| `Task: reportbuilder.section.purge` | Delete report sections (Report Builder) |
+| `Task: reportbuilder.theme.view` | View data themes (Report Builder) |
+| `Task: reportbuilder.theme.add` | Create data themes (Report Builder) |
+| `Task: reportbuilder.theme.edit` | Edit data themes (Report Builder) |
+| `Task: reportbuilder.theme.purge` | Delete data themes (Report Builder) |
+| `Task: reportbuilder.dashboard.view` | View dashboards (Report Builder) |
+| `Task: reportbuilder.dashboard.add` | Create dashboards (Report Builder) |
+| `Task: reportbuilder.dashboard.edit` | Edit dashboards (Report Builder) |
+| `Task: reportbuilder.dashboard.purge` | Delete dashboards (Report Builder) |
+| `Task: reportbuilder.category.view` | View report categories (Report Builder) |
+| `Task: reportbuilder.category.add` | Create report categories (Report Builder) |
+| `Task: reportbuilder.category.edit` | Edit report categories (Report Builder) |
+| `Task: reportbuilder.category.purge` | Delete report categories (Report Builder) |
+| `Task: reportbuilder.agegroup.view` | View age categories and age groups (Report Builder) |
+| `Task: reportbuilder.agegroup.add` | Create age categories and age groups (Report Builder) |
+| `Task: reportbuilder.agegroup.edit` | Edit age categories and age groups (Report Builder) |
+| `Task: reportbuilder.agegroup.purge` | Delete age categories and age groups (Report Builder) |
+| `Task: reportbuilder.library.view` | View report library entries (Report Builder) |
+| `Task: reportbuilder.library.add` | Create report library entries (Report Builder) |
+| `Task: reportbuilder.library.edit` | Edit report library entries (Report Builder) |
+| `Task: reportbuilder.library.purge` | Delete report library entries (Report Builder) |
+| `Task: reportbuilder.etlsource.view` | View ETL source connections (Report Builder) |
+| `Task: reportbuilder.etlsource.add` | Create ETL source connections (Report Builder) |
+| `Task: reportbuilder.etlsource.edit` | Edit ETL source connections (Report Builder) |
+| `Task: reportbuilder.etlsource.purge` | Delete ETL source connections (Report Builder) |
+| `Task: reportbuilder.etlmonitor.view` | View ETL health monitors (Report Builder) |
+| `Task: reportbuilder.etlmonitor.add` | Create ETL health monitors (Report Builder) |
+| `Task: reportbuilder.etlmonitor.edit` | Edit ETL health monitors (Report Builder) |
+| `Task: reportbuilder.etlmonitor.purge` | Delete ETL health monitors (Report Builder) |
+| `Task: reportbuilder.report.compile` | Compile report definitions (Report Builder) |
+| `Task: reportbuilder.report.run` | Run reports and download outputs (Report Builder) |
+| `Task: reportbuilder.schema.view` | Browse the database schema (Report Builder) |
+| `Task: reportbuilder.sql.execute` | Execute SQL previews (Report Builder) |
+| `Task: reportbuilder.package.import` | Import distribution packages (Report Builder) |
+| `Task: reportbuilder.package.export` | Export distribution packages (Report Builder) |
+
+`*.purge` privileges are intentionally not part of any module role — they are held by
+System Developer (core auto-grants new privileges to that role) and can be delegated ad hoc.
+
+### Shipped roles
+
+| Role | Inherits | Privileges |
+|---|---|---|
+| **Report Viewer** | — | 11 privileges (see `roles/reportbuilder-roles.csv`) |
+| **Report Runner** | Report Viewer | 1 privileges (see `roles/reportbuilder-roles.csv`) |
+| **Report Author** | Report Runner | 18 privileges (see `roles/reportbuilder-roles.csv`) |
+| **Content Publisher** | Report Viewer | 2 privileges (see `roles/reportbuilder-roles.csv`) |
+| **ETL Administrator** | Report Viewer | 4 privileges (see `roles/reportbuilder-roles.csv`) |
+
+Role chain: `Report Viewer` → `Report Runner` → `Report Author`; `Report Viewer` →
+`Content Publisher`; `Report Viewer` → `ETL Administrator`.
+
+### Using these privileges in your content pack
+
+Site content packs assign privileges through the same initializer mechanism. Create (or
+extend) `configuration/roles/` in your pack and reference the privilege **names exactly as
+listed above** — initializer matches roles and privileges by name.
+
+#### Example — extend an existing site role
+
+`configuration/roles/site-roles.csv`:
+```csv
+Role name,Description,Inherited roles,Privileges
+Organizational: Clinician,District clinician,,Task: reportbuilder.report.view; Task: reportbuilder.dashboard.view; Task: reportbuilder.report.run
+Organizational: District Biostatistician,Runs and schedules HMIS reports,Organizational: Clinician,Task: reportbuilder.indicator.view; Task: reportbuilder.section.view
+```
+
+#### Example — a custom role reusing the module's bundles
+
+Because the shipped roles are plain OpenMRS roles, site roles can simply inherit them:
+
+```csv
+Role name,Description,Inherited roles,Privileges
+METS Reporting Team,METS officers who build and publish reports,Report Author; Content Publisher,
+```
+
+That single inheritance grants everything an author and a publisher need — no privilege
+has to be listed twice.
+
+#### Where packs place the files
+
+```
+<your-content-pack>/
+  configuration/
+    roles/
+      site-roles.csv          <- references Task: reportbuilder.* names
+    privileges/
+      (optional extra privileges of your own)
+```
+
+The module's own CSVs are loaded from inside the OMOD; your pack's `configuration/` folder
+goes to the OpenMRS application data directory. Both are processed by the same initializer run —
+module configuration first, so the privileges always exist before your roles reference them.
+
+### Enforcement map
+
+| API surface | Required privilege |
+|---|---|
+| Report definitions: list / get | `report.view` |
+| Report definitions: save / retire | `report.add` / `report.edit` |
+| Compile a report | `report.compile` |
+| Run / download report output (incl. data export & evaluation endpoints) | `report.run` |
+| Indicators / sections / themes / dashboards / categories / age groups: view vs save vs purge | matching `<domain>.view` / `.add`+`.edit` / `.purge` |
+| SQL preview, section preview, allowed-table prefixes | `sql.execute` |
+| Database schema browsing | `schema.view` |
+| ETL sources + their table/column exploration | `etlsource.*` |
+| ETL monitors | `etlmonitor.*` |
+| Import distribution packages (directory import, single entity, legacy & generic imports) | `package.import` |
+| Export / shipping packages, available packages | `package.export` |
+| Dashboard patient search / cohort listings | `dashboard.view` |
+
+### Rollout checklist
+
+1. Install the initializer module (2.9.0+ verified) and deploy the report builder OMOD.
+2. Log in as an administrator — System Developer holds all 46 privileges automatically.
+3. Assign the module roles (or your own roles referencing the privileges) — **no other user
+   can reach the module until this is done.**
+4. To allow hard deletes, grant the specific `*.purge` privileges to a trusted role.
+
+### Troubleshooting
+
+- *"Privilege required: Task: reportbuilder.…"* — the user lacks a role carrying that
+  privilege; check **Admin → Manage Roles** and the user's assigned roles.
+- *Privilege missing from Admin → Roles entirely* — initializer did not run or the OMOD
+  predates the security config; redeploy and check `openmrs.log` for initializer lines.
+- *Renaming a privilege* is a breaking change: role assignments reference the name. Keep
+  `ReportBuilderPrivileges.java` and the CSV in sync (they are verified to match).
+
 ## License
 
 Mozilla Public License 2.0

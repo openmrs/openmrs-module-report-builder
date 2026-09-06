@@ -3,6 +3,7 @@ package org.openmrs.module.reportbuilder.web.controller;
 import org.apache.commons.lang3.StringUtils;
 import org.openmrs.api.APIAuthenticationException;
 import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import org.openmrs.module.reporting.common.DateUtil;
 import org.openmrs.module.reporting.evaluation.EvaluationContext;
 import org.openmrs.module.reporting.evaluation.parameter.Parameter;
@@ -68,6 +69,7 @@ public class ReportDownloadController {
 	@ResponseBody
 	public Object download(HttpServletRequest request,
 	        @RequestParam(required = true, value = "uuid") String reportDefinitionUuid) {
+		Context.requirePrivilege("Task: reportbuilder.report.run");
 		try {
 			String endDateStr = request.getParameter("endDate");
 			if (endDateStr != null && !validateDateIsValidFormat(endDateStr)) {
@@ -133,6 +135,7 @@ public class ReportDownloadController {
 	@ResponseBody
 	public Object downloadCsv(HttpServletRequest request,
 	        @RequestParam(required = true, value = "uuid") String reportDefinitionUuid) {
+		Context.requirePrivilege("Task: reportbuilder.report.run");
 		try {
 			String endDateStr = request.getParameter("endDate");
 			if (endDateStr != null && !validateDateIsValidFormat(endDateStr)) {

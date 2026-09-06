@@ -13,7 +13,9 @@ import org.openmrs.module.webservices.rest.web.resource.impl.NeedsPaging;
 import org.openmrs.module.webservices.rest.web.response.ResponseException;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Resource(name = RestConstants.VERSION_1 + "/etltable", supportedClass = ETLTableResource.ETLTable.class, supportedOpenmrsVersions = {
@@ -26,11 +28,24 @@ public class ETLTableResource extends DelegatingCrudResource<ETLTableResource.ET
 		
 		private String name;
 		
+		private Long rows; // approximate INFORMATION_SCHEMA count; null for views
+		
+		private Date updateTime; // last modification time; null when unknown
+		
+		private String tableType; // "BASE TABLE" or "VIEW"
+		
 		public ETLTable() {
 		}
 		
 		public ETLTable(String name) {
+			this(name, null, null, null);
+		}
+		
+		public ETLTable(String name, Long rows, Date updateTime, String tableType) {
 			this.name = name;
+			this.rows = rows;
+			this.updateTime = updateTime;
+			this.tableType = tableType;
 			// stable-enough synthetic uuid derived from name
 			this.uuid = UUID.nameUUIDFromBytes(("etl-table:" + name).getBytes()).toString();
 		}
@@ -50,10 +65,80 @@ public class ETLTableResource extends DelegatingCrudResource<ETLTableResource.ET
 		public void setName(String name) {
 			this.name = name;
 		}
+		
+		public Long getRows() {
+			return rows;
+		}
+		
+		public void setRows(Long rows) {
+			this.rows = rows;
+		}
+		
+		public Date getUpdateTime() {
+			return updateTime;
+		}
+		
+		public void setUpdateTime(Date updateTime) {
+			this.updateTime = updateTime;
+		}
+		
+		public String getTableType() {
+			return tableType;
+		}
+		
+		public void setTableType(String tableType) {
+			this.tableType = tableType;
+		}
 	}
 	
 	private ReportBuilderService service() {
 		return Context.getService(ReportBuilderService.class);
+	}
+	
+	/** Tolerates alias-case differences in the INFORMATION_SCHEMA result maps */
+	private static Object firstOf(Map row, String... keys) {
+		for (String key : keys) {
+			Object value = row.get(key);
+			if (value != null) {
+				return value;
+			}
+		}
+		// case-insensitive fallback
+		for (Object keyObj : row.keySet()) {
+			String key = String.valueOf(keyObj);
+			for (String wanted : keys) {
+				if (key.equalsIgnoreCase(wanted)) {
+					return row.get(keyObj);
+				}
+			}
+		}
+		return null;
+	}
+	
+	private static String toName(Map row) {
+		Object value = firstOf(row, "tableName", "TABLE_NAME");
+		return value == null ? null : String.valueOf(value);
+	}
+	
+	private static Long toRowCount(Map row) {
+		Object value = firstOf(row, "tableRows", "TABLE_ROWS");
+		if (value instanceof Number) {
+			return ((Number) value).longValue();
+		}
+		return null;
+	}
+	
+	private static Date toUpdateTime(Map row) {
+		Object value = firstOf(row, "updateTime", "UPDATE_TIME");
+		if (value instanceof Date) {
+			return (Date) value;
+		}
+		return null;
+	}
+	
+	private static String toTableType(Map row) {
+		Object value = firstOf(row, "tableType", "TABLE_TYPE");
+		return value == null ? null : String.valueOf(value);
 	}
 	
 	@Override
@@ -85,13 +170,13 @@ public class ETLTableResource extends DelegatingCrudResource<ETLTableResource.ET
 	
 	@Override
 	public PageableResult doGetAll(RequestContext context) throws ResponseException {
-		List<String> names = service().getETLTables(); // from DAO query INFORMATION_SCHEMA
-		
+		List<Map> tables = service().getETLTables(); // from DAO query INFORMATION_SCHEMA
+
 		List<ETLTable> rows = new ArrayList<>();
-		for (String n : names) {
-			rows.add(new ETLTable(n));
+		for (Map table : tables) {
+			rows.add(new ETLTable(toName(table), toRowCount(table), toUpdateTime(table), toTableType(table)));
 		}
-		
+
 		// NeedsPaging will apply startIndex & limit automatically
 		return new NeedsPaging<>(rows, context);
 	}
@@ -100,12 +185,16 @@ public class ETLTableResource extends DelegatingCrudResource<ETLTableResource.ET
 	protected PageableResult doSearch(RequestContext context) throws ResponseException {
 		// optional: allow q filter on table name
 		String q = context.getParameter("q");
-		List<String> names = service().getETLTables();
-		
+		List<Map> tables = service().getETLTables();
+
 		List<ETLTable> rows = new ArrayList<>();
-		for (String n : names) {
-			if (q == null || q.trim().isEmpty() || n.toLowerCase().contains(q.toLowerCase())) {
-				rows.add(new ETLTable(n));
+		for (Map table : tables) {
+			String name = toName(table);
+			if (name == null) {
+				continue;
+			}
+			if (q == null || q.trim().isEmpty() || name.toLowerCase().contains(q.toLowerCase())) {
+				rows.add(new ETLTable(name, toRowCount(table), toUpdateTime(table), toTableType(table)));
 			}
 		}
 		return new NeedsPaging<>(rows, context);
@@ -116,6 +205,9 @@ public class ETLTableResource extends DelegatingCrudResource<ETLTableResource.ET
 		DelegatingResourceDescription d = new DelegatingResourceDescription();
 		d.addProperty("uuid");
 		d.addProperty("name");
+		d.addProperty("rows");
+		d.addProperty("updateTime");
+		d.addProperty("tableType");
 		return d;
 	}
 	

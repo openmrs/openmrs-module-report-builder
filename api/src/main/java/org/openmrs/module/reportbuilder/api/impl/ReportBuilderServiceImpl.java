@@ -661,7 +661,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 	
 	@Override
 	@Transactional(readOnly = true)
-	public List<String> getETLTables() {
+	public List<Map> getETLTables() {
 		return dao.getETLTables(getAllowedTablePrefixes());
 	}
 	

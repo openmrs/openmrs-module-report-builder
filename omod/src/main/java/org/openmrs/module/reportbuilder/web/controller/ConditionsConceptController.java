@@ -3,6 +3,7 @@ package org.openmrs.module.reportbuilder.web.controller;
 import org.openmrs.Concept;
 import org.openmrs.api.APIAuthenticationException;
 import org.openmrs.api.context.Context;
+import org.openmrs.module.reportbuilder.security.ReportBuilderPrivileges;
 import org.openmrs.api.ConceptService;
 import org.openmrs.module.reportbuilder.web.resources.mapper.ConceptMapper;
 import org.openmrs.module.webservices.rest.web.RequestContext;
@@ -38,6 +39,7 @@ public class ConditionsConceptController {
     @RequestMapping(method = RequestMethod.GET)
     @ResponseBody
     public Object get(HttpServletRequest request, RequestContext context) {
+        Context.requirePrivilege("Task: reportbuilder.report.view");
         try {
             List<ConceptMapper> conceptMapperList = new ArrayList<>();
 
