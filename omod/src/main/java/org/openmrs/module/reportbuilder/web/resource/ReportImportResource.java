@@ -3,7 +3,7 @@
  * v. 2.0. If a copy of the MPL was not distributed with this file, You can
  * obtain one at http://mozilla.org/MPL/2.0/. OpenMRS is also distributed under
  * the terms of the Healthcare Disclaimer located at http://openmrs.org/license.
- *
+ * <p>
  * Copyright (C) OpenMRS Inc. OpenMRS is a registered trademark and the OpenMRS
  * graphic logo is a trademark of OpenMRS Inc.
  */
@@ -14,6 +14,7 @@ import org.openmrs.module.reportbuilder.api.ReportBuilderService;
 import org.openmrs.module.reportbuilder.model.ReportBuilderReport;
 import org.openmrs.module.reportbuilder.web.controller.dto.ImportRequest;
 import org.openmrs.module.reportbuilder.web.controller.dto.ImportResult;
+import org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport;
 import org.openmrs.module.webservices.rest.SimpleObject;
 import org.openmrs.module.webservices.rest.web.RequestContext;
 import org.openmrs.module.webservices.rest.web.RestConstants;
@@ -267,8 +268,8 @@ public class ReportImportResource extends DelegatingCrudResource<ImportResult> {
 						// Raw compiled design produced by compile - the canonical folder is itself a
 						// valid package. Synthesize a SerializedReport for entity-level import.
 						log.info("Importing raw compiled design: {}", reportFile.getName());
-						result = getImportService().importSerializedReportFromObject(toSerializedReport(root, reportFile),
-						    null);
+						SerializedReport serializedReport = toSerializedReport(root, reportFile);
+						result = getImportService().importSerializedReportFromObject(serializedReport, null);
 					}
 					
 					SimpleObject reportInfo = new SimpleObject();
@@ -277,8 +278,11 @@ public class ReportImportResource extends DelegatingCrudResource<ImportResult> {
 						reportInfo.put("name", result.getReportBuilderReport().getName());
 						reportInfo.put("code", result.getReportBuilderReport().getCode());
 						
-						// Create or update the linked ReportLibrary entry for this report.
-						getImportService().saveOrUpdateLibraryEntry(result.getReportBuilderReport().getUuid());
+						// Create or update the linked ReportLibrary entry for this report, pointing
+						// it at the definition actually saved by this import (carries the
+						// package-stamped reportDefinitionUuid).
+						getImportService().saveOrUpdateLibraryEntry(result.getReportBuilderReport().getUuid(),
+						    result.getReportDefinition() != null ? result.getReportDefinition().getUuid() : null);
 					}
 					if (result.getReportDefinition() != null) {
 						reportInfo.put("reportDefinitionUuid", result.getReportDefinition().getUuid());
@@ -293,6 +297,12 @@ public class ReportImportResource extends DelegatingCrudResource<ImportResult> {
 				catch (Exception e) {
 					errorCount++;
 					log.error("Failed to import compiled report: {}", reportFile.getName(), e);
+					try {
+						Context.clearSession();
+					}
+					catch (Exception inner) {
+						log.debug("Failed to clear session after import error", inner);
+					}
 				}
 			}
 			

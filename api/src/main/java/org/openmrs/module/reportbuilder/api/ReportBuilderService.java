@@ -286,6 +286,22 @@ public interface ReportBuilderService extends OpenmrsService {
 	CompiledReportArtifacts compileReport(String reportBuilderReportUuid);
 	
 	/**
+	 * Variant of {@link #compileReport(String)} controlling whether the ReportBuilderReport entity
+	 * is updated with compile state.
+	 * 
+	 * @param reportBuilderReportUuid The UUID of the report to compile
+	 * @param updateReportBuilderReport true when the compile originates from the compile REST
+	 *            resource and the report entity should be updated (compile status, compiled
+	 *            definition and design uuids, configJson); false when invoked from the import
+	 *            process, which persists the report entity itself and must not have its authored
+	 *            state rewritten by the compile
+	 * @return CompiledReportArtifacts containing the compiled report artifacts
+	 */
+	@Transactional
+	@Authorized("Task: reportbuilder.report.compile")
+	CompiledReportArtifacts compileReport(String reportBuilderReportUuid, boolean updateReportBuilderReport);
+	
+	/**
 	 * Compiles a report and optionally adds it to the report library with the specified category.
 	 * This method is reusable from both REST API and export/import processes.
 	 * 
@@ -1053,6 +1069,18 @@ public interface ReportBuilderService extends OpenmrsService {
 	 */
 	@Authorized({ "Task: reportbuilder.library.add", "Task: reportbuilder.library.edit" })
 	void saveOrUpdateLibraryEntry(String reportBuilderReportUuid);
+	
+	/**
+	 * Variant of {@link #saveOrUpdateLibraryEntry(String)} with an explicit ReportDefinition uuid.
+	 * 
+	 * @param reportBuilderReportUuid the builder report to sync into the library
+	 * @param reportDefinitionUuid uuid of the ReportDefinition to reference - the definition
+	 *            actually saved by the current import; keeps the entry connected to the definition
+	 *            saved under the package-stamped uuid. When blank the report's own
+	 *            compiledReportDefinitionUuid is used.
+	 */
+	@Authorized({ "Task: reportbuilder.library.add", "Task: reportbuilder.library.edit" })
+	void saveOrUpdateLibraryEntry(String reportBuilderReportUuid, String reportDefinitionUuid);
 	
 	// ========== Report Package Methods ==========
 	

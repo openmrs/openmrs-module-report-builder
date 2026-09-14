@@ -790,6 +790,17 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 
     @Override
     public CompiledReportArtifacts compileReport(String reportBuilderReportUuid) {
+        return compileReport(reportBuilderReportUuid, true);
+    }
+
+    /**
+     * @param updateReportBuilderReport true when the compile originates from the compile REST
+     *            resource, so the ReportBuilderReport entity is updated with compile state
+     *            (status, compiled definition/design uuids). False when invoked from the import
+     *            process, which persists the report entity itself and must not have its authored
+     *            configJson or compile status rewritten by the compile.
+     */
+    public CompiledReportArtifacts compileReport(String reportBuilderReportUuid, boolean updateReportBuilderReport) {
         ReportDefinitionService reportDefinitionService = Context.getService(ReportDefinitionService.class);
 
         ReportBuilderReport report = getReportBuilderReportByUuid(reportBuilderReportUuid);
@@ -797,8 +808,10 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
             throw new IllegalArgumentException("ReportBuilderReport not found: " + reportBuilderReportUuid);
         }
 
-        report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.COMPILING);
-        saveReportBuilderReport(report);
+        if (updateReportBuilderReport) {
+            report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.COMPILING);
+            saveReportBuilderReport(report);
+        }
 
         try {
             JsonNode reportConfig = parseJson(report.getConfigJson(), "Invalid ReportBuilderReport configJson");
@@ -806,15 +819,17 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
             // Linelist (patient-level) reports have a different configJson shape and use a
             // LineListDataSetDefinition; compile them on a dedicated path.
             if (isLinelistReport(report, reportConfig)) {
-                return compileLinelistReport(report, reportConfig, reportDefinitionService);
+                return compileLinelistReport(report, reportConfig, reportDefinitionService, updateReportBuilderReport);
             }
 
             // Aggregate reports are compiled on a dedicated path.
-            return compileAggregateReport(report, reportConfig, reportDefinitionService);
+            return compileAggregateReport(report, reportConfig, reportDefinitionService, updateReportBuilderReport);
         } catch (Exception e) {
-            report.setLastCompiledAt(new Date());
-            report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.FAILED);
-            saveReportBuilderReport(report);
+            if (updateReportBuilderReport) {
+                report.setLastCompiledAt(new Date());
+                report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.FAILED);
+                saveReportBuilderReport(report);
+            }
             throw e;
         }
     }
@@ -840,8 +855,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
             }
         }
 
-        // Compile the report
-        CompiledReportArtifacts compiled = compileReport(reportBuilderReportUuid);
+        // Compile the report; compile-resource origin, so the report entity is updated.
+        CompiledReportArtifacts compiled = compileReport(reportBuilderReportUuid, true);
 
         // Add to library (creates or updates ReportLibrary entry); picks up the category applied above.
         addToReportLibrary(getReportBuilderReportByUuid(reportBuilderReportUuid));
@@ -867,7 +882,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
     }
 
     private CompiledReportArtifacts compileAggregateReport(ReportBuilderReport builderReport, JsonNode reportConfig,
-                                                           ReportDefinitionService reportDefinitionService) {
+                                                           ReportDefinitionService reportDefinitionService,
+                                                           boolean updateReportBuilderReport) {
         JsonNode definitionNode = reportConfig.path("definition");
         JsonNode designNode = reportConfig.path("design");
 
@@ -943,22 +959,6 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                 builderReport.getCategory() != null ? builderReport.getCategory().getName() : null,
                 reportDefinition != null ? reportDefinition.getUuid() : null);
 
-        String compiledDefinitionJson;
-        try {
-            compiledDefinitionJson = objectMapper.writerWithDefaultPrettyPrinter()
-                    .writeValueAsString(compiledDefinitionRoot);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to serialize compiled report definition JSON", e);
-        }
-
-        String definitionFileName = buildDefinitionFileName(builderReport);
-        File definitionFile;
-        try {
-            definitionFile = ReportDesignFileUtil.writeJsonStringToDesignFile(definitionFileName, compiledDefinitionJson);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to write compiled report definition file", e);
-        }
-
         ArrayNode compiledDesignGroups;
         JsonNode authoredGroups = designNode.path("groups");
         if (authoredGroups.isArray() && authoredGroups.size() > 0) {
@@ -981,6 +981,35 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         compiledDhis2.put("enabled", compiledDhis2Rows.size() > 0);
         compiledDhis2.set("rows", compiledDhis2Rows);
         compiledDesignRoot.set("dhis2", compiledDhis2);
+
+        // Embed the render template (groups/dimensions/dhis2) inside the shipped design file.
+        // At compile time the template lives only in the ReportDesign DB resource, so exported
+        // packages carried the definition JSON alone and imported reports rendered with "No
+        // groups defined in template". The evaluator ignores the extra key.
+        compiledDefinitionRoot.set("reportDesignTemplate", compiledDesignRoot);
+
+        // Self-containment stamps: everything import needs to materialize this compiled report
+        // (design store path, data set key, parameters/mappings) without re-deriving it.
+        String definitionFileName = buildDefinitionFileName(builderReport);
+        compiledDefinitionRoot.put("description", builderReport.getDescription());
+        compiledDefinitionRoot.put("formatVersion", 2);
+        compiledDefinitionRoot.set("definitionSpec",
+            buildDefinitionSpec(definitionFileName, "defaultDataSet", aggregateParametersNode()));
+
+        String compiledDefinitionJson;
+        try {
+            compiledDefinitionJson = objectMapper.writerWithDefaultPrettyPrinter()
+                    .writeValueAsString(compiledDefinitionRoot);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to serialize compiled report definition JSON", e);
+        }
+
+        File definitionFile;
+        try {
+            definitionFile = ReportDesignFileUtil.writeJsonStringToDesignFile(definitionFileName, compiledDefinitionJson);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to write compiled report definition file", e);
+        }
 
         String compiledDesignJson;
         try {
@@ -1013,11 +1042,13 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 
         ReportDesign jsonDesign = saveOrUpdateJsonReportDesign(reportDefinition, compiledDesignJson, builderReport);
 
-        builderReport.setCompiledReportDefinitionUuid(reportDefinition.getUuid());
-        builderReport.setCompiledReportDesignUuid(jsonDesign != null ? jsonDesign.getUuid() : null);
-        builderReport.setLastCompiledAt(new Date());
-        builderReport.setCompileStatus(ReportBuilderReport.ReportCompileStatus.COMPILED);
-        builderReport = saveReportBuilderReport(builderReport);
+        if (updateReportBuilderReport) {
+            builderReport.setCompiledReportDefinitionUuid(reportDefinition.getUuid());
+            builderReport.setCompiledReportDesignUuid(jsonDesign != null ? jsonDesign.getUuid() : null);
+            builderReport.setLastCompiledAt(new Date());
+            builderReport.setCompileStatus(ReportBuilderReport.ReportCompileStatus.COMPILED);
+            builderReport = saveReportBuilderReport(builderReport);
+        }
 
         CompiledReportArtifacts out = new CompiledReportArtifacts();
         out.setReportBuilderReport(builderReport);
@@ -1035,7 +1066,8 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
      * LineListDataSetEvaluator can read it at runtime.
      */
     private CompiledReportArtifacts compileLinelistReport(ReportBuilderReport report, JsonNode reportConfig,
-                                                          ReportDefinitionService reportDefinitionService) {
+                                                          ReportDefinitionService reportDefinitionService,
+                                                          boolean updateReportBuilderReport) {
 
         ObjectNode compiledConfig;
         String compiledJson;
@@ -1048,6 +1080,13 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 
             stampCompiledIdentity(report, compiledConfig, "LINE_LIST", report.getCategory() != null ? report.getCategory()
                     .getName() : null, reportDefinition != null ? reportDefinition.getUuid() : null);
+
+            // Self-containment stamps: everything import needs to materialize this compiled report
+            // without re-deriving it. Parameters are copied verbatim from the compiled config.
+            compiledConfig.put("description", report.getDescription());
+            compiledConfig.put("formatVersion", 2);
+            compiledConfig.set("definitionSpec", buildDefinitionSpec(buildLinelistDefinitionFileName(report),
+                "linelistDataSet", copyParametersForSpec(compiledConfig.path("parameters"))));
 
             compiledJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(compiledConfig);
         } catch (Exception e) {
@@ -1107,11 +1146,13 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 
         ReportDesign jsonDesign = saveOrUpdateJsonReportDesign(reportDefinition, compiledJson, report);
 
-        report.setCompiledReportDefinitionUuid(reportDefinition.getUuid());
-        report.setCompiledReportDesignUuid(jsonDesign != null ? jsonDesign.getUuid() : null);
-        report.setLastCompiledAt(new Date());
-        report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.COMPILED);
-        report = saveReportBuilderReport(report);
+        if (updateReportBuilderReport) {
+            report.setCompiledReportDefinitionUuid(reportDefinition.getUuid());
+            report.setCompiledReportDesignUuid(jsonDesign != null ? jsonDesign.getUuid() : null);
+            report.setLastCompiledAt(new Date());
+            report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.COMPILED);
+            report = saveReportBuilderReport(report);
+        }
 
         CompiledReportArtifacts out = new CompiledReportArtifacts();
         out.setReportBuilderReport(report);
@@ -1162,19 +1203,17 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 
     /**
      * Builds a file name for a linelist report design file. Stored under the canonical
-     * configuration/reports root, i.e. reports/linelist/{code}.json to avoid clashing with
-     * aggregate designs in the same directory.
+     * configuration/reports root, i.e. reports/linelist/{uuid}.json to avoid clashing with
+     * aggregate designs in the same directory. The report uuid is used verbatim so the file name is
+     * identical on every instance - codes and names can differ between source and target, which
+     * used to leave imported definitions pointing at a design file that did not exist.
      */
     private String buildLinelistDefinitionFileName(ReportBuilderReport report) {
-        String base = report.getCode();
-        if (base == null || base.trim().isEmpty()) {
-            base = report.getUuid();
+        if (!hasText(report.getUuid())) {
+            throw new IllegalStateException(
+                    "Report uuid is required to name the compiled design file: " + report.getName());
         }
-        base = sanitize(base);
-        if (base == null || base.trim().isEmpty()) {
-            base = "report_" + System.currentTimeMillis();
-        }
-        return "linelist/" + base + ".json";
+        return "linelist/" + report.getUuid() + ".json";
     }
 
     private ArrayNode compileAuthoredDesignGroups(JsonNode authoredGroups, JsonNode sections) {
@@ -1680,18 +1719,20 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                 .replaceAll("[^A-Za-z0-9]+", "_").replaceAll("_+", "_").replaceAll("^_", "").replaceAll("_$", "");
     }
 
+    /**
+     * Builds a file name for an aggregate report design file relative to the canonical
+     * configuration/reports root; keeps aggregate designs grouped under reports/aggregates
+     * alongside linelist designs under reports/linelist. The report uuid is used verbatim so the
+     * file name is identical on every instance - codes and names can differ between source and
+     * target, which used to leave imported definitions pointing at a design file that did not
+     * exist.
+     */
     private String buildDefinitionFileName(ReportBuilderReport report) {
-        String base = report.getCode();
-        if (base == null || base.trim().isEmpty()) {
-            base = report.getUuid();
+        if (!hasText(report.getUuid())) {
+            throw new IllegalStateException(
+                    "Report uuid is required to name the compiled design file: " + report.getName());
         }
-        base = sanitize(base);
-        if (base == null || base.trim().isEmpty()) {
-            base = "report_" + System.currentTimeMillis();
-        }
-        // Relative to the canonical configuration/reports root; keeps aggregate designs grouped
-        // under reports/aggregates alongside linelist designs under reports/linelist.
-        return "aggregates/" + base + ".json";
+        return "aggregates/" + report.getUuid() + ".json";
     }
 
     /**
@@ -1726,9 +1767,106 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         }
     }
 
+    /**
+     * Builds the declarative materialization spec stamped onto a compiled design file: where the
+     * file lives in the design store, which data set key the ReportDefinition uses, and the
+     * parameters/mappings to declare. Import applies this as data instead of re-deriving it.
+     */
+    private ObjectNode buildDefinitionSpec(String designPath, String dataSetKey, ArrayNode parameters) {
+        ObjectNode spec = objectMapper.createObjectNode();
+        spec.put("designPath", designPath);
+        spec.put("dataSetKey", dataSetKey);
+        spec.set("parameters", parameters != null ? parameters : objectMapper.createArrayNode());
+        ObjectNode mappings = objectMapper.createObjectNode();
+        if (parameters != null) {
+            java.util.Set<String> seen = new java.util.HashSet<String>();
+            Iterator<JsonNode> it = parameters.elements();
+            while (it.hasNext()) {
+                String name = it.next().path("name").asText("");
+                if (!name.trim().isEmpty() && seen.add(name.toLowerCase())) {
+                    mappings.put(name, "${" + name + "}");
+                }
+            }
+        }
+        spec.set("parameterMappings", mappings);
+        return spec;
+    }
+
+    /**
+     * Copies name/label/type entries from a compiled config's parameters array for the definition
+     * spec, skipping blank names and deduping case-insensitively (mirrors declareLinelistParameter).
+     */
+    private ArrayNode copyParametersForSpec(JsonNode parameters) {
+        ArrayNode out = objectMapper.createArrayNode();
+        if (parameters == null || !parameters.isArray()) {
+            return out;
+        }
+        java.util.Set<String> seen = new java.util.HashSet<String>();
+        Iterator<JsonNode> it = parameters.elements();
+        while (it.hasNext()) {
+            JsonNode parameter = it.next();
+            String name = parameter.path("name").asText("");
+            if (name.trim().isEmpty() || !seen.add(name.toLowerCase())) {
+                continue;
+            }
+            ObjectNode copy = out.addObject();
+            copy.put("name", name);
+            copy.put("label", parameter.path("label").asText(name));
+            copy.put("type", parameter.path("type").asText("DATE"));
+            if (parameter.hasNonNull("required")) {
+                copy.put("required", parameter.get("required").asBoolean());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Builds the ReportLibrary metaJson payload - the parameter set the UI renders as the
+     * report's report params - from the parameters the compiled file declares.
+     */
+    private String buildLibraryMetaJson(JsonNode parameters) {
+        ObjectNode meta = objectMapper.createObjectNode();
+        meta.set("parameters", copyParametersForSpec(parameters));
+        try {
+            return objectMapper.writeValueAsString(meta);
+        } catch (Exception e) {
+            throw new APIException("Failed to serialize library metaJson", e);
+        }
+    }
+
+    /** The fixed aggregate parameter set, mirroring what the aggregate compile declares. */
+    private ArrayNode aggregateParametersNode() {
+        ArrayNode parameters = objectMapper.createArrayNode();
+        ObjectNode startDate = parameters.addObject();
+        startDate.put("name", "startDate");
+        startDate.put("label", "Start Date");
+        startDate.put("type", "DATE");
+        startDate.put("required", true);
+        ObjectNode endDate = parameters.addObject();
+        endDate.put("name", "endDate");
+        endDate.put("label", "End Date");
+        endDate.put("type", "DATE");
+        endDate.put("required", true);
+        return parameters;
+    }
+
     private ReportDefinition findOrCreateReportDefinition(ReportBuilderReport report,
                                                           ReportDefinitionService reportDefinitionService) {
-        String existingUuid = report.getCompiledReportDefinitionUuid();
+        return findOrCreateReportDefinition(report, reportDefinitionService, null);
+    }
+
+    /**
+     * @param preferredDefinitionUuid definition uuid that wins over the report entity's own
+     *            reference when present. Import passes the reportDefinitionUuid stamped in the
+     *            compiled design file so the definition saved on this instance keeps the source
+     *            instance's uuid - keeping the ReportLibrary entry and other cross-instance
+     *            references to it connected.
+     */
+    private ReportDefinition findOrCreateReportDefinition(ReportBuilderReport report,
+                                                          ReportDefinitionService reportDefinitionService,
+                                                          String preferredDefinitionUuid) {
+        String existingUuid = hasText(preferredDefinitionUuid) ? preferredDefinitionUuid.trim()
+                : report.getCompiledReportDefinitionUuid();
 
         if (existingUuid != null && !existingUuid.trim().isEmpty()) {
             ReportDefinition existing = reportDefinitionService.getDefinitionByUuid(existingUuid);
@@ -1738,6 +1876,11 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         }
 
         ReportDefinition rd = new ReportDefinition();
+        if (existingUuid != null && !existingUuid.trim().isEmpty()) {
+            // Preserve the referenced uuid on create instead of letting a fresh one be generated,
+            // so the definition saved here matches what the package and library entries expect.
+            rd.setUuid(existingUuid);
+        }
         rd.setName(report.getName());
         rd.setDescription(report.getDescription());
         return rd;
@@ -1939,6 +2082,16 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
      */
     @Override
     public void saveOrUpdateLibraryEntry(String reportBuilderReportUuid) {
+        saveOrUpdateLibraryEntry(reportBuilderReportUuid, null);
+    }
+
+    /**
+     * @param reportDefinitionUuid explicit uuid of the ReportDefinition to reference in the
+     *            library entry - the definition actually saved by the current import. When blank
+     *            the report's own compiledReportDefinitionUuid is used.
+     */
+    @Override
+    public void saveOrUpdateLibraryEntry(String reportBuilderReportUuid, String reportDefinitionUuid) {
         if (reportBuilderReportUuid == null || reportBuilderReportUuid.trim().isEmpty()) {
             return;
         }
@@ -1948,7 +2101,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                 log.warn("saveOrUpdateLibraryEntry: no builder report found for uuid {}", reportBuilderReportUuid);
                 return;
             }
-            addToReportLibrary(report);
+            addToReportLibrary(report, reportDefinitionUuid);
         } catch (Exception e) {
             log.error("Failed to sync library entry for builder report {}", reportBuilderReportUuid, e);
         }
@@ -1958,6 +2111,17 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
      * Automatically add a report builder report to the report library
      */
     private void addToReportLibrary(ReportBuilderReport report) {
+        addToReportLibrary(report, null);
+    }
+
+    /**
+     * @param reportDefinitionUuidOverride explicit definition uuid to reference - used by import
+     *            to point the entry at the definition actually saved by the current import. When
+     *            blank the report entity's own compiledReportDefinitionUuid is used.
+     */
+    private void addToReportLibrary(ReportBuilderReport report, String reportDefinitionUuidOverride) {
+        String definitionUuid = hasText(reportDefinitionUuidOverride) ? reportDefinitionUuidOverride.trim()
+                : report.getCompiledReportDefinitionUuid();
         try {
             // Check if library entry already exists for this report
             ReportLibrary existingEntry = dao.getReportLibraryByBuilderReportUuid(report.getUuid());
@@ -1969,7 +2133,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                 existingEntry.setCode(report.getCode());
                 existingEntry.setCategory(report.getCategory());
                 existingEntry.setReportType(report.getReportType());
-                existingEntry.setReportDefinitionUuid(report.getCompiledReportDefinitionUuid());
+                existingEntry.setReportDefinitionUuid(definitionUuid);
                 existingEntry.setRetired(report.getRetired());
                 dao.saveReportLibrary(existingEntry);
                 log.debug("Updated report library entry for report: {}", report.getName());
@@ -1982,7 +2146,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                 libraryEntry.setCode(report.getCode());
                 libraryEntry.setSourceType(ReportLibrary.ReportSourceType.BUILDER);
                 libraryEntry.setReportBuilderReportUuid(report.getUuid());
-                libraryEntry.setReportDefinitionUuid(report.getCompiledReportDefinitionUuid());
+                libraryEntry.setReportDefinitionUuid(definitionUuid);
                 libraryEntry.setCategory(report.getCategory());
                 libraryEntry.setReportType(report.getReportType());
                 libraryEntry.setMigrated(false);
@@ -4206,8 +4370,16 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
             // Create or update the report entity
             ReportBuilderReport report = createOrUpdateReportFromSerialized(serializedReport, categoryUuid);
 
-            // Compile the report to generate the report definition
-            ReportDefinition reportDefinition = compileReportForImport(report, serializedReport.getConfig());
+            if (!isMaterializableCompiledPayload(serializedReport.getConfig())) {
+                throw new APIException("Compiled payload for '" + serializedReport.getName()
+                        + "' contains no evaluable design (report_fields/indicators/sections or "
+                        + "baseCohortDefinition/dataSetDefinitions) - refusing to materialize it");
+            }
+
+            // Materialize the compiled report from the self-contained payload - no recompilation.
+            // The report entity's authored state is owned by the entity-level import above.
+            ReportDefinition reportDefinition = materializeCompiledReport(report, serializedReport.getConfig(),
+                parseCompiledAt(serializedReport.getCompiledAt()));
 
             // Create the artifacts object
             CompiledReportArtifacts artifacts = new CompiledReportArtifacts();
@@ -4262,10 +4434,6 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         // Validate basic fields
         if (serializedReport.getName() == null || serializedReport.getName().trim().isEmpty()) {
             result.addError("Report name is required");
-        }
-
-        if (serializedReport.getCode() == null || serializedReport.getCode().trim().isEmpty()) {
-            result.addError("Report code is required");
         }
 
         if (serializedReport.getConfig() == null) {
@@ -4409,7 +4577,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         // Set basic properties
         report.setName(serializedReport.getName());
         report.setDescription(serializedReport.getDescription());
-        report.setCode(serializedReport.getCode());
+        if (serializedReport.getCode() != null && !serializedReport.getCode().trim().isEmpty()) {
+            report.setCode(serializedReport.getCode());
+        }
 
         // Set report type
         if (serializedReport.getReportType() != null) {
@@ -4464,68 +4634,57 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
     }
 
     /**
-     * Compile a report during import to generate the ReportDefinition Reconstructs the
-     * ReportDefinition and ReportDesign from the compiled config
+     * Materializes an imported compiled report: writes the shipped design file into the canonical
+     * store verbatim, rebuilds the ReportDefinition (parameters + one data set) from the stamped
+     * definitionSpec, re-links the JSON ReportDesign template, and wires the report entity's
+     * compile state. Import never re-derives configuration - the compiled payload is applied as
+     * data.
+     *
+     * @param report the persisted ReportBuilderReport (entity-level import already done)
+     * @param fileRoot the compiled design payload (wrapper config or raw design file root)
+     * @param lastCompiledAt source compile time when parseable, else now
+     * @return the saved ReportDefinition (referenced by the caller's library sync)
      */
-    private ReportDefinition compileReportForImport(ReportBuilderReport report, ObjectNode compiledConfig) {
+    private ReportDefinition materializeCompiledReport(ReportBuilderReport report, ObjectNode fileRoot,
+                                                       Date lastCompiledAt) {
+        if (fileRoot == null) {
+            throw new APIException("Compiled design payload is required to import report: " + report.getName());
+        }
+
+        boolean linelist = report.getReportType() == ReportBuilderReport.ReportType.LINE_LIST;
+        ObjectNode spec = fileRoot.hasNonNull("definitionSpec") && fileRoot.get("definitionSpec").isObject()
+                ? (ObjectNode) fileRoot.get("definitionSpec") : null;
+
+        // (a) Design file first: the store must hold the payload before any DB state references it.
+        String designPath = spec != null && hasText(spec.path("designPath").asText(null)) ? spec.path("designPath")
+                .asText() : (linelist ? buildLinelistDefinitionFileName(report) : buildDefinitionFileName(report));
+        String fileJson;
         try {
-            ReportDefinitionService reportDefinitionService = Context.getService(ReportDefinitionService.class);
-            ReportDefinition reportDefinition = findOrCreateReportDefinition(report, reportDefinitionService);
-
-            // Clear existing definitions
-            reportDefinition.getParameters().clear();
-            reportDefinition.getDataSetDefinitions().clear();
-
-            // Set basic properties
-            reportDefinition.setName(report.getName());
-            reportDefinition.setDescription(report.getDescription());
-
-            // Convert compiled config to JSON string for ReportDesign
-            String compiledJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(compiledConfig);
-
-            // Create definition file name
-            String definitionFileName = buildLinelistDefinitionFileName(report);
-
-            // Process based on report type
-            if (report.getReportType() == ReportBuilderReport.ReportType.LINE_LIST) {
-                compileLinelistReportForImport(report, compiledConfig, reportDefinition, reportDefinitionService);
-            } else {
-                // For aggregate reports, we need similar logic
-                compileAggregateReportForImport(report, compiledConfig, reportDefinition, reportDefinitionService);
-            }
-
-            // Save the ReportDesign
-            ReportDesign jsonDesign = saveOrUpdateJsonReportDesign(reportDefinition, compiledJson, report);
-
-            // Update report with compiled artifacts
-            report.setCompiledReportDefinitionUuid(reportDefinition.getUuid());
-            report.setCompiledReportDesignUuid(jsonDesign != null ? jsonDesign.getUuid() : null);
-            report.setLastCompiledAt(new Date());
-            report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.COMPILED);
-            report.setConfigJson(compiledJson);
-
-            // Save the updated report
-            saveReportBuilderReport(report);
-
-            log.debug("Compiled report definition for import: {}", report.getName());
-            return reportDefinition;
-
+            fileJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(fileRoot);
+            ReportDesignFileUtil.writeJsonStringToDesignFile(designPath, fileJson);
         } catch (Exception e) {
-            log.error("Failed to compile report during import: {}", report.getName(), e);
-            throw new APIException("Failed to compile report during import: " + e.getMessage(), e);
+            throw new APIException("Failed to write compiled design file '" + designPath + "' for report "
+                    + report.getName(), e);
         }
-    }
 
-    /**
-     * Compile a linelist report during import
-     */
-    private void compileLinelistReportForImport(ReportBuilderReport report, ObjectNode compiledConfig,
-                                                ReportDefinition reportDefinition, ReportDefinitionService reportDefinitionService) throws Exception {
+        ReportDefinitionService reportDefinitionService = Context.getService(ReportDefinitionService.class);
 
-        // Process parameters from compiled config
+        // (b) ReportDefinition under the source instance's stamped uuid for cross-site continuity.
+        String stampedDefinitionUuid = fileRoot.hasNonNull("reportDefinitionUuid")
+                ? fileRoot.get("reportDefinitionUuid").asText() : null;
+        ReportDefinition reportDefinition = findOrCreateReportDefinition(report, reportDefinitionService,
+            stampedDefinitionUuid);
+        reportDefinition.setName(report.getName());
+        reportDefinition.setDescription(report.getDescription());
+        reportDefinition.getParameters().clear();
+        reportDefinition.getDataSetDefinitions().clear();
+
+        // (c) Parameters: v2 reads the spec, v1 falls back to the file's own parameters (linelist)
+        // or the fixed aggregate date range.
+        JsonNode parameters = spec != null && spec.path("parameters").isArray() ? spec.path("parameters")
+                : (linelist ? fileRoot.path("parameters") : aggregateParametersNode());
         List<Parameter> declaredParameters = new ArrayList<Parameter>();
-        JsonNode parameters = compiledConfig.path("parameters");
-        if (parameters.isArray() && parameters.size() > 0) {
+        if (parameters.isArray()) {
             Iterator<JsonNode> it = parameters.elements();
             while (it.hasNext()) {
                 JsonNode param = it.next();
@@ -4534,109 +4693,122 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                     continue;
                 }
                 declareLinelistParameter(declaredParameters, reportDefinition, paramName,
-                        param.path("label").asText(paramName), mapParameterTypeToClass(param.path("type").asText("DATE")));
+                        param.path("label").asText(paramName),
+                        mapParameterTypeToClass(param.path("type").asText("DATE")));
             }
         }
 
-        // Create LineListDataSetDefinition
-        LineListDataSetDefinition dsd = new LineListDataSetDefinition();
-        dsd.setName(report.getName() + " Data Set");
-        dsd.setDescription(report.getDescription());
-
-        // Use relative filename for portability
-        String definitionFileName = buildLinelistDefinitionFileName(report);
-        dsd.setReportDesignPath(definitionFileName);
-
-        // Add parameters to dataset
-        for (Parameter p : declaredParameters) {
-            dsd.addParameter(p);
-        }
-
-        // Create parameter mappings
+        // (d) Mappings: v2 reads the spec (guarded to declared params), v1 derives ${param}.
         Map<String, Object> parameterMappings = new HashMap<String, Object>();
-        for (Parameter p : declaredParameters) {
-            parameterMappings.put(p.getName(), "${" + p.getName() + "}");
-        }
-
-        // Add dataset definition to report
-        reportDefinition.addDataSetDefinition("linelistDataSet", dsd, parameterMappings);
-        reportDefinition = reportDefinitionService.saveDefinition(reportDefinition);
-    }
-
-    /**
-     * Compile an aggregate report during import
-     */
-    private void compileAggregateReportForImport(ReportBuilderReport report, ObjectNode compiledConfig,
-                                                 ReportDefinition reportDefinition, ReportDefinitionService reportDefinitionService) throws Exception {
-
-        // Process parameters from compiled config
-        List<Parameter> declaredParameters = new ArrayList<Parameter>();
-        JsonNode parameters = compiledConfig.path("parameters");
-        if (parameters.isArray() && parameters.size() > 0) {
-            Iterator<JsonNode> it = parameters.elements();
-            while (it.hasNext()) {
-                JsonNode param = it.next();
-                String paramName = param.path("name").asText("");
-                if (paramName.trim().isEmpty()) {
-                    continue;
+        JsonNode mappings = spec != null ? spec.path("parameterMappings") : null;
+        if (mappings != null && mappings.isObject()) {
+            Iterator<String> fieldNames = mappings.fieldNames();
+            while (fieldNames.hasNext()) {
+                String fieldName = fieldNames.next();
+                for (Parameter p : declaredParameters) {
+                    if (p.getName().equals(fieldName)) {
+                        parameterMappings.put(fieldName, mappings.get(fieldName).asText());
+                        break;
+                    }
                 }
-                declareLinelistParameter(declaredParameters, reportDefinition, paramName,
-                        param.path("label").asText(paramName), mapParameterTypeToClass(param.path("type").asText("DATE")));
+            }
+        } else {
+            for (Parameter p : declaredParameters) {
+                parameterMappings.put(p.getName(), "${" + p.getName() + "}");
             }
         }
 
-        // Process dataSetDefinitions if present (aggregate reports use these)
-        JsonNode dataSetDefinitions = compiledConfig.path("dataSetDefinitions");
-        boolean hasDataSets = false;
-        if (dataSetDefinitions.isArray() && dataSetDefinitions.size() > 0) {
-            Iterator<JsonNode> it = dataSetDefinitions.elements();
-            int dsIndex = 0;
-            while (it.hasNext()) {
-                JsonNode dsConfig = it.next();
-                String dsName = dsConfig.path("name").asText("dataset" + dsIndex);
-                String dsType = dsConfig.path("type").asText("PATIENT_DATA_SET");
-
-                // Create appropriate dataset definition based on type
-                if ("PATIENT_DATA_SET".equals(dsType)) {
-                    hasDataSets = true;
-                    LineListDataSetDefinition dsd = new LineListDataSetDefinition();
-                    dsd.setName(dsName);
-                    dsd.setDescription(dsConfig.path("description").asText(""));
-
-                    // Add parameters
-                    for (Parameter p : declaredParameters) {
-                        dsd.addParameter(p);
-                    }
-
-                    Map<String, Object> parameterMappings = new HashMap<String, Object>();
-                    for (Parameter p : declaredParameters) {
-                        parameterMappings.put(p.getName(), "${" + p.getName() + "}");
-                    }
-
-                    reportDefinition.addDataSetDefinition(dsName, dsd, parameterMappings);
-                }
-                // Add other dataset types as needed
-                dsIndex++;
+        // (e) The single data set, keyed as the spec says.
+        String dataSetKey = spec != null && hasText(spec.path("dataSetKey").asText(null)) ? spec.path("dataSetKey")
+                .asText() : (linelist ? "linelistDataSet" : "defaultDataSet");
+        if (linelist) {
+            LineListDataSetDefinition dsd = new LineListDataSetDefinition();
+            dsd.setName(report.getName() + " Data Set");
+            dsd.setDescription(report.getDescription());
+            dsd.setReportDesignPath(designPath);
+            for (Parameter p : declaredParameters) {
+                dsd.addParameter(p);
             }
-        }
-
-        // Default aggregate dataset pointing at the compiled design file under the canonical
-        // configuration/reports root - mirrors what a normal compile produces, so imported
-        // aggregate reports can actually evaluate.
-        if (!hasDataSets) {
-            String designPath = buildDefinitionFileName(report);
+            reportDefinition.addDataSetDefinition(dataSetKey, dsd, parameterMappings);
+        } else {
             AggregateReportDataSetDefinition dsd = new AggregateReportDataSetDefinition();
             dsd.setName(report.getName() + " Data Set");
             dsd.setDescription(report.getDescription());
             dsd.setReportDesignPath(designPath);
+            for (Parameter p : declaredParameters) {
+                dsd.addParameter(p);
+            }
+            reportDefinition.addDataSetDefinition(dataSetKey, dsd, parameterMappings);
+        }
+        reportDefinition = reportDefinitionService.saveDefinition(reportDefinition);
 
-            Map<String, Object> parameterMappings = new HashMap<String, Object>();
-            reportDefinition.addDataSetDefinition("defaultDataSet", dsd, parameterMappings);
+        // (f) ReportDesign template: the embedded render template when present (aggregate v2),
+        // otherwise the whole payload (linelist files are their own template; legacy v1 files).
+        JsonNode templateNode = fileRoot.get("reportDesignTemplate");
+        String templateJson = fileJson;
+        if (templateNode != null && templateNode.isObject()) {
+            try {
+                templateJson = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(templateNode);
+            } catch (Exception e) {
+                throw new APIException("Failed to serialize embedded report design template for report "
+                        + report.getName(), e);
+            }
+        }
+        ReportDesign jsonDesign = saveOrUpdateJsonReportDesign(reportDefinition, templateJson, report);
+
+        // (g) Entity wiring only - never authored fields like configJson/metaJson.
+        report.setCompiledReportDefinitionUuid(reportDefinition.getUuid());
+        report.setCompiledReportDesignUuid(jsonDesign != null ? jsonDesign.getUuid() : null);
+        report.setLastCompiledAt(lastCompiledAt != null ? lastCompiledAt : new Date());
+        report.setCompileStatus(ReportBuilderReport.ReportCompileStatus.COMPILED);
+        saveReportBuilderReport(report);
+
+        // (h) Library entry: sync it and carry the parameter set as metaJson - the report params
+        // the UI renders. addToReportLibrary never touches metaJson, so set it explicitly from
+        // the same parameters the definition spec declares.
+        addToReportLibrary(report, reportDefinition.getUuid());
+        ReportLibrary library = dao.getReportLibraryByBuilderReportUuid(report.getUuid());
+        if (library != null) {
+            library.setMetaJson(buildLibraryMetaJson(parameters));
+            dao.saveReportLibrary(library);
         }
 
-        reportDefinition = reportDefinitionService.saveDefinition(reportDefinition);
+        log.debug("Materialized compiled report: {} (design={}, definition={})", report.getName(), designPath,
+            reportDefinition.getUuid());
+        return reportDefinition;
+    }
 
-        reportDefinition = reportDefinitionService.saveDefinition(reportDefinition);
+    /**
+     * True when the payload carries an evaluable compiled design, so materialization produces a
+     * runnable report. Rejects the {uuid,name,code} stub emitted by uncompiled wrapper exports.
+     */
+    private boolean isMaterializableCompiledPayload(ObjectNode root) {
+        if (root == null) {
+            return false;
+        }
+        JsonNode spec = root.path("definitionSpec");
+        if (spec.isObject() && hasText(spec.path("designPath").asText(null))) {
+            return true;
+        }
+        if (root.path("report_fields").isArray() || root.path("indicators").isArray() || root.path("sections").isArray()) {
+            return true;
+        }
+        return root.has("baseCohortDefinition") && root.has("dataSetDefinitions");
+    }
+
+    /**
+     * Parses the wrapper's compiledAt stamp (yyyy-MM-dd'T'HH:mm:ssZ); null when absent/unparseable.
+     */
+    private Date parseCompiledAt(String compiledAt) {
+        if (compiledAt == null || compiledAt.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ").parse(compiledAt);
+        } catch (java.text.ParseException e) {
+            log.debug("Could not parse compiledAt stamp: {}", compiledAt);
+            return null;
+        }
     }
 
     /**
@@ -4645,7 +4817,21 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
     private File exportCompiledReport(ReportBuilderReport report,
                                       com.fasterxml.jackson.databind.node.ObjectNode compiledConfig, File destination) {
         try {
-            SerializedReport serialized = new SerializedReport(report, compiledConfig);
+            if (!isMaterializableCompiledPayload(compiledConfig)) {
+                // Wrapper exports must be self-contained: pull the real compiled design from the
+                // canonical store rather than shipping the {uuid,name,code} stub.
+                String designPath = report.getReportType() == ReportBuilderReport.ReportType.LINE_LIST
+                        ? buildLinelistDefinitionFileName(report) : buildDefinitionFileName(report);
+                java.io.File storeFile = ReportDesignFileUtil.resolveDesignFile(designPath);
+                if (storeFile != null && storeFile.exists()) {
+                    compiledConfig = (com.fasterxml.jackson.databind.node.ObjectNode) objectMapper.readTree(storeFile);
+                } else {
+                    log.warn("No compiled design file in store for report {} ({}); exporting stub payload",
+                            report.getUuid(), designPath);
+                }
+            }
+
+            SerializedReport serialized = new SerializedReport(report, compiledConfig, destination.getName());
             serialized.setCompiledAt(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ").format(new Date()));
             serialized.setCompiledBy(Context.getAuthenticatedUser() != null ? Context.getAuthenticatedUser().getUsername()
                     : "system");

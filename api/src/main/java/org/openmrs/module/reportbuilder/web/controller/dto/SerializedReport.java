@@ -14,6 +14,7 @@ public class SerializedReport {
     private String name;
     private String description;
     private String code;
+    private String fileName;
     private String version;
     private String category;
     private String categoryUuid;
@@ -31,10 +32,11 @@ public class SerializedReport {
      * @param report        The source report entity
      * @param compiledConfig The compiled configuration object
      */
-    public SerializedReport(ReportBuilderReport report, ObjectNode compiledConfig) {
+    public SerializedReport(ReportBuilderReport report, ObjectNode compiledConfig, String fileName) {
         this.uuid = report.getUuid();
         this.name = report.getName();
         this.description = report.getDescription();
+        this.fileName = fileName;
         this.code = report.getCode();
         this.version = "1.0.0"; // Default version
         this.reportType = report.getReportType() != null ? report.getReportType().name() : "AGGREGATE";
@@ -63,6 +65,14 @@ public class SerializedReport {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
     }
 
     public String getDescription() {
