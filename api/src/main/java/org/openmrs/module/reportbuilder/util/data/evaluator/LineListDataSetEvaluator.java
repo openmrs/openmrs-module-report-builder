@@ -188,7 +188,7 @@ public class LineListDataSetEvaluator implements DataSetEvaluator {
 	 * @param patientIds Patient IDs to evaluate for
 	 * @param context Evaluation context with parameter values
 	 * @param baseCohortSql Base cohort SQL to extract filters from for data consistency
-	 * @return Map of columnKey -> patientId -> value
+	 * @return Map of {@code columnKey -> patientId -> value}
 	 */
 	private Map<String, Map<Integer, Object>> preEvaluateSqlColumns(Map<String, ColumnDefinition> columns,
 	        Set<Integer> patientIds, EvaluationContext context, String baseCohortSql) {

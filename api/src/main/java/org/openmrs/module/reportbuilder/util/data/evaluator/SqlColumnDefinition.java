@@ -79,7 +79,7 @@ public class SqlColumnDefinition {
 	}
 
 	/**
-	 * Returns all evaluated values for this column (patientId -> value).
+	 * Returns all evaluated values for this column ({@code patientId -> value}).
 	 */
 	public Map<Integer, Object> getEvaluatedValues() {
 		return evaluatedValues;
