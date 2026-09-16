@@ -9,7 +9,7 @@
 
 	<groupId>org.openmrs.module</groupId>
 	<artifactId>reportbuilder</artifactId>
-	<version>1.0.0</version>
+	<version>1.0.1-SNAPSHOT</version>
 	<packaging>pom</packaging>
 	<name>Report Builder</name>
 	<description>This module Exposes APIs to support the report builder frontend application</description>
@@ -20,7 +20,7 @@
 		<connection>scm:git:git@github.com:openmrs/openmrs-module-report-builder.git</connection>
 		<developerConnection>scm:git:git@github.com:openmrs/openmrs-module-report-builder.git</developerConnection>
 		<url>https://github.com/openmrs/openmrs-module-report-builder/</url>
-	  <tag>1.0.0</tag>
+	  <tag>HEAD</tag>
   </scm>
 
 	<modules>
