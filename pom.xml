@@ -18,9 +18,9 @@
 	<url>https://wiki.openmrs.org/x/FQ4z</url>
 
 	<scm>
-		<connection>scm:git:git@github.com:openmrs/openmrs-module-reportbuilder.git</connection>
-		<developerConnection>scm:git:git@github.com:openmrs/openmrs-module-reportbuilder.git</developerConnection>
-		<url>https://github.com/openmrs/openmrs-module-reportbuilder/</url>
+		<connection>scm:git:git@github.com:openmrs/openmrs-module-report-builder.git</connection>
+		<developerConnection>scm:git:git@github.com:openmrs/openmrs-module-report-builder.git</developerConnection>
+		<url>https://github.com/openmrs/openmrs-module-report-builder/</url>
 	</scm>
 
 	<modules>
