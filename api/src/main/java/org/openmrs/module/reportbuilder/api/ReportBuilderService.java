@@ -61,6 +61,39 @@ public interface ReportBuilderService extends OpenmrsService {
 	@Authorized("Task: reportbuilder.report.run")
 	String buildRenderedOutput(ReportData reportData, ReportDesign reportDesign, String remapJsonOptional);
 	
+	/**
+	 * Renders the evaluated report as an Excel (.xlsx) workbook mirroring the HTML rendering.
+	 * 
+	 * @param reportData the evaluated report data
+	 * @param reportDesign the compiled JSON report design
+	 * @return the workbook bytes
+	 */
+	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.run")
+	byte[] buildExcelOutput(ReportData reportData, ReportDesign reportDesign);
+	
+	/**
+	 * Renders the evaluated report as CSV (RFC 4180, UTF-8 with BOM) mirroring the HTML rendering.
+	 * 
+	 * @param reportData the evaluated report data
+	 * @param reportDesign the compiled JSON report design
+	 * @return the CSV bytes
+	 */
+	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.run")
+	byte[] buildCsvOutput(ReportData reportData, ReportDesign reportDesign);
+	
+	/**
+	 * Renders the evaluated report as a PDF document mirroring the HTML rendering.
+	 * 
+	 * @param reportData the evaluated report data
+	 * @param reportDesign the compiled JSON report design
+	 * @return the PDF bytes
+	 */
+	@Transactional(readOnly = true)
+	@Authorized("Task: reportbuilder.report.run")
+	byte[] buildPdfOutput(ReportData reportData, ReportDesign reportDesign);
+	
 	// =========================
 	// Indicator
 	// =========================

@@ -71,6 +71,14 @@
 			<version>4.5.14</version>
 		</dependency>
 
+		<!-- OpenPDF (LGPL/MPL) for PDF downloads; bundled in the omod because nothing on the
+		     platform provides it. Version also declared in the parent pom. -->
+		<dependency>
+			<groupId>com.github.librepdf</groupId>
+			<artifactId>openpdf</artifactId>
+			<version>${openpdfVersion}</version>
+		</dependency>
+
 	</dependencies>
 
 	<build>

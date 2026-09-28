@@ -355,13 +355,17 @@ public class EvaluateReportController {
 		return null;
 	}
 	
+	/**
+	 * Parses a submitted date value. Only unambiguous formats are accepted: ISO yyyy-MM-dd and its
+	 * datetime variants. Day-first and month-first slash patterns were deliberately dropped - they
+	 * silently misinterpret 06/07/2024 depending on an assumed convention (and disagree with the
+	 * endDate validation, which is strict yyyy-MM-dd).
+	 */
 	private Date tryParseDate(String value) {
 		List<String> patterns = new ArrayList<String>();
 		patterns.add("yyyy-MM-dd");
 		patterns.add("yyyy-MM-dd'T'HH:mm:ss");
 		patterns.add("yyyy-MM-dd'T'HH:mm:ss.SSS");
-		patterns.add("dd/MM/yyyy");
-		patterns.add("MM/dd/yyyy");
 		
 		for (String pattern : patterns) {
 			try {

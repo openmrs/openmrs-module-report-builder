@@ -390,7 +390,7 @@ public final class LinelistConfigCompiler {
 		
 		StringBuilder subquery = new StringBuilder();
 		subquery.append("SELECT e.").append(field).append(" FROM ").append(table)
-		        .append(" e WHERE e.client_id = :patientId");
+		        .append(" e WHERE e.patient_id = :patientId");
 		
 		if (VOIDED_TABLE.matcher(table).find()) {
 			subquery.append(" AND e.voided = 0");

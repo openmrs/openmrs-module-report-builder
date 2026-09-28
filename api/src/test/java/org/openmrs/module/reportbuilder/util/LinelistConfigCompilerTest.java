@@ -47,7 +47,7 @@ public class LinelistConfigCompilerTest {
 	        + "    {\"name\":\"Birth Date\",\"dataDefinition\":{\"type\":\"SQL\",\"config\":{\"sql\":\"`person`.`birthdate`\"}}},"
 	        + "    {\"name\":\"Age\",\"dataDefinition\":{\"type\":\"CALCULATION\",\"config\":{\"calculation\":\"AGE\",\"onDate\":true}}},"
 	        + "    {\"name\":\"Return Visit Date\",\"dataDefinition\":{\"type\":\"SQL\",\"config\":{\"sql\":\"`mamba_fact_encounter`.`return_visit_date`\"}},\"repeatResolution\":{\"strategy\":\"LATEST\"}},"
-	        + "    {\"name\":\"Fulfillment\",\"dataDefinition\":{\"type\":\"SQL\",\"config\":{\"sql\":\"SELECT CASE WHEN x=1 THEN 'Yes' ELSE 'No' END FROM t WHERE client_id = :patientId LIMIT 1\"}}},"
+	        + "    {\"name\":\"Fulfillment\",\"dataDefinition\":{\"type\":\"SQL\",\"config\":{\"sql\":\"SELECT CASE WHEN x=1 THEN 'Yes' ELSE 'No' END FROM t WHERE patient_id = :patientId LIMIT 1\"}}},"
 	        + "    {\"name\":\"Telephone\",\"dataDefinition\":{\"type\":\"PERSON_ATTRIBUTE\",\"config\":{\"attributeTypeUuid\":\"tel-uuid\"}}},"
 	        + "    {\"name\":\"Village\",\"dataDefinition\":{\"type\":\"SQL\",\"config\":{\"sql\":\"`person_address`.`city_village`\"}}},"
 	        + "    {\"name\":\"Other\",\"dataDefinition\":{\"type\":\"SQL\",\"config\":{\"sql\":\"`custom_tbl`.`custom_col`\"}}}"

@@ -49,6 +49,12 @@ import org.openmrs.module.reportbuilder.util.IndicatorValidator;
 import org.openmrs.module.reportbuilder.util.LinelistConfigCompiler;
 import org.openmrs.module.reportbuilder.util.ReportDesignFileUtil;
 import org.openmrs.module.reportbuilder.util.LinelistHtmlRenderer;
+import org.openmrs.module.reportbuilder.util.AggregateReportModeler;
+import org.openmrs.module.reportbuilder.util.LinelistReportModeler;
+import org.openmrs.module.reportbuilder.util.ReportModelCsvRenderer;
+import org.openmrs.module.reportbuilder.util.ReportModelPdfRenderer;
+import org.openmrs.module.reportbuilder.util.ReportModelXlsxRenderer;
+import org.openmrs.module.reportbuilder.util.ReportTableModel;
 import org.openmrs.module.reportbuilder.util.ReportDesignHtmlRenderer;
 import org.openmrs.module.reportbuilder.util.data.definition.AggregateReportDataSetDefinition;
 import org.openmrs.module.reportbuilder.util.data.definition.LineListDataSetDefinition;
@@ -113,6 +119,16 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
     private final ReportDesignHtmlRenderer reportDesignHtmlRenderer = new ReportDesignHtmlRenderer();
 
     private final LinelistHtmlRenderer linelistHtmlRenderer = new LinelistHtmlRenderer();
+
+    private final AggregateReportModeler aggregateReportModeler = new AggregateReportModeler();
+
+    private final LinelistReportModeler linelistReportModeler = new LinelistReportModeler();
+
+    private final ReportModelXlsxRenderer xlsxRenderer = new ReportModelXlsxRenderer();
+
+    private final ReportModelCsvRenderer csvRenderer = new ReportModelCsvRenderer();
+
+    private final ReportModelPdfRenderer pdfRenderer = new ReportModelPdfRenderer();
 
     /**
      * Maximum nesting depth for JSON serialization to handle OpenMRS entity graphs with circular
@@ -405,6 +421,43 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         // Default to aggregate report rendering
         Map<String, Object> values = extractFlatValues(reportData);
         return reportDesignHtmlRenderer.buildRenderedOutputOnly(templateJson, values, remapJsonOptional);
+    }
+
+    @Override
+    public byte[] buildExcelOutput(ReportData reportData, ReportDesign reportDesign) {
+        return xlsxRenderer.render(buildReportTableModel(reportData, reportDesign));
+    }
+
+    @Override
+    public byte[] buildCsvOutput(ReportData reportData, ReportDesign reportDesign) {
+        return csvRenderer.render(buildReportTableModel(reportData, reportDesign));
+    }
+
+    @Override
+    public byte[] buildPdfOutput(ReportData reportData, ReportDesign reportDesign) {
+        return pdfRenderer.render(buildReportTableModel(reportData, reportDesign));
+    }
+
+    /**
+     * Builds the format-neutral table model for the given evaluated report, dispatching linelist
+     * vs aggregate exactly like {@link #buildRenderedOutput(ReportData, ReportDesign, String)} so
+     * the Excel/CSV downloads mirror the HTML rendering.
+     */
+    private ReportTableModel buildReportTableModel(ReportData reportData, ReportDesign reportDesign) {
+        String templateJson = readDesignResource(reportDesign);
+
+        if (isLinelistReportTemplate(templateJson)) {
+            return linelistReportModeler.buildModel(reportData, reportDesign);
+        }
+
+        try {
+            AggregateReportModeler.ReportDesignTemplate tpl = objectMapper.readValue(templateJson,
+                AggregateReportModeler.ReportDesignTemplate.class);
+            return aggregateReportModeler.buildModel(tpl, extractFlatValues(reportData));
+        }
+        catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to parse report design template", e);
+        }
     }
 
     /**

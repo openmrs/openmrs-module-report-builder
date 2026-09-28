@@ -179,6 +179,31 @@
 			<artifactId>reporting-api</artifactId>
 		</dependency>
 
+		<!-- Same version the reporting module packs in its omod; provided so we compile against
+		     the POI already present on the server instead of shipping our own copy -->
+		<dependency>
+			<groupId>org.apache.poi</groupId>
+			<artifactId>poi</artifactId>
+			<version>${poiVersion}</version>
+			<scope>provided</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.apache.poi</groupId>
+			<artifactId>poi-ooxml</artifactId>
+			<version>${poiVersion}</version>
+			<scope>provided</scope>
+		</dependency>
+
+		<!-- PDF downloads. Nothing on the platform provides a PDF library, so the omod bundles
+		     openpdf (LGPL/MPL); this scope keeps the api jar free of it -->
+		<dependency>
+			<groupId>com.github.librepdf</groupId>
+			<artifactId>openpdf</artifactId>
+			<version>${openpdfVersion}</version>
+			<scope>provided</scope>
+		</dependency>
+
 		<dependency>
 			<groupId>org.openmrs.module</groupId>
 			<artifactId>serialization.xstream-api</artifactId>

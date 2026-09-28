@@ -211,6 +211,8 @@
 
 	<properties>
 		<openmrsPlatformVersion>2.6.3</openmrsPlatformVersion>
+		<poiVersion>3.12</poiVersion>
+		<openpdfVersion>1.3.43</openpdfVersion>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
 		<calculationVersion>1.1</calculationVersion>
