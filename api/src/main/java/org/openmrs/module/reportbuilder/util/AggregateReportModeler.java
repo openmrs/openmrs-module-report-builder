@@ -438,7 +438,7 @@ public class AggregateReportModeler {
 	
 	/**
 	 * Resolves the value for a compiled placeholder key, falling back to the alternative spellings
-	 * the runtime may have produced. Compile-time sanitize() spells "+" as "plus" and "<"/">" as
+	 * the runtime may have produced. Compile-time sanitize() spells "+" as "plus" and "&lt;"/"&gt;" as
 	 * "lt"/"gt" inside design placeholder keys, while the runtime column keys built by
 	 * AggregateDataSetEvaluator.sanitizeKey strip those characters - so the design key
 	 * HT01a_20yrsplus_F may be stored as HT01a_20yrs_F, or lt10_yrs as 10_yrs. Exact matches always
