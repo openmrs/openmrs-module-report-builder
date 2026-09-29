@@ -29,7 +29,6 @@ import org.openmrs.module.reportbuilder.legacyconfig.builder.DatasetDefinitionFa
 import org.openmrs.module.reportbuilder.legacyconfig.builder.DesignBuilder;
 import org.openmrs.module.reportbuilder.legacyconfig.builder.ParameterBuilder;
 import org.openmrs.module.reportbuilder.legacyconfig.builder.ReportDefinitionFactory;
-import org.openmrs.module.reportbuilder.legacyconfig.generic.GenericReportImportService;
 import org.openmrs.module.reportbuilder.legacyconfig.importer.ReportImportResult;
 import org.openmrs.module.reportbuilder.legacyconfig.LegacyReportImporter;
 import org.openmrs.module.reportbuilder.legacyconfig.model.CohortConfig;
@@ -2213,70 +2212,6 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         }
     }
 
-    /**
-     * Add a generic report to the report library Note: For generic reports, reportDefinitionUuid is
-     * used only as a reference identifier. The actual report definition is stored as JSON in the
-     * LegacyReport table, not as a serialized ReportDefinition in the reporting module tables.
-     */
-    public void addGenericReportToLibrary(String reportDefinitionUuid, String name, String description, String code,
-                                          ReportCategory category, ReportBuilderReport.ReportType reportType) {
-        try {
-            // Check if library entry already exists for this report definition
-            ReportLibrary existingEntry = dao.getReportLibraryByReportDefinitionUuid(reportDefinitionUuid);
-
-            if (existingEntry != null) {
-                // Update existing entry
-                existingEntry.setName(name);
-                existingEntry.setDescription(description);
-                existingEntry.setCode(code);
-                existingEntry.setCategory(category);
-                existingEntry.setReportType(reportType);
-                dao.saveReportLibrary(existingEntry);
-                log.debug("Updated report library entry for generic report: {}", name);
-                return;
-            }
-
-            // Check for broken references - entries with the same name but missing ReportDefinition
-            List<ReportLibrary> entriesByName = dao.getReportLibrariesByName(name);
-            if (entriesByName != null && !entriesByName.isEmpty()) {
-                for (ReportLibrary entry : entriesByName) {
-                    // Check if this entry has the same UUID
-                    if (reportDefinitionUuid.equals(entry.getReportDefinitionUuid())) {
-                        // Found an entry with the same UUID - update it
-                        log.info("Updating existing report library entry for: {} (UUID: {})", name, reportDefinitionUuid);
-                        entry.setName(name);
-                        entry.setDescription(description);
-                        entry.setCode(code);
-                        entry.setCategory(category);
-                        entry.setReportType(reportType);
-                        entry.setRetired(false); // Unretire if it was retired
-                        entry.setMigrated(true);
-                        dao.saveReportLibrary(entry);
-                        log.info("Updated report library entry: {}", name);
-                        return;
-                    }
-                }
-            }
-
-            // Create new library entry
-            ReportLibrary libraryEntry = new ReportLibrary();
-            libraryEntry.setUuid(UUID.randomUUID().toString());
-            libraryEntry.setName(name);
-            libraryEntry.setDescription(description);
-            libraryEntry.setCode(code);
-            libraryEntry.setSourceType(ReportLibrary.ReportSourceType.LEGACY);
-            libraryEntry.setReportDefinitionUuid(reportDefinitionUuid);
-            libraryEntry.setCategory(category);
-            libraryEntry.setReportType(reportType);
-            libraryEntry.setMigrated(true);
-            dao.saveReportLibrary(libraryEntry);
-            log.debug("Added generic report to library: {}", name);
-        } catch (Exception e) {
-            log.error("Failed to add generic report to library: {}", name, e);
-            // Don't throw exception to prevent breaking the import operation
-        }
-    }
-
     @Override
     public int cleanupBrokenReportReferences() {
         try {
@@ -2422,7 +2357,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
 
             @Override
             public boolean accept(File dir, String name) {
-                // Skip generic reports - they should be imported via GenericReportImporter
+                // Skip generic report files - not part of the legacy package format
                 return name != null && name.toLowerCase().endsWith(".json") && !name.endsWith("-generic.json");
             }
         });
@@ -2825,49 +2760,6 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         }
     }
 
-    @Override
-    public void ensureImportAllLegacyReportsTaskExists() {
-        String taskUuid = "8f5b0c2a-6c7c-4c4c-9b35-1b7d4ef4c001";
-        String taskName = "Import All Legacy Reports";
-        String taskDescription = "Imports all available legacy reports from the runtime configuration folder";
-        String taskClass = "org.openmrs.module.reportbuilder.tasks.ImportAllLegacyReportsTask";
-
-        org.openmrs.scheduler.SchedulerService schedulerService = Context.getSchedulerService();
-        org.openmrs.scheduler.TaskDefinition task = schedulerService.getTaskByUuid(taskUuid);
-
-        if (task == null) {
-            task = new org.openmrs.scheduler.TaskDefinition();
-            task.setUuid(taskUuid);
-            task.setName(taskName);
-            task.setDescription(taskDescription);
-            task.setTaskClass(taskClass);
-            task.setStartOnStartup(false);
-            task.setStarted(false);
-            task.setRepeatInterval(0L);
-            schedulerService.saveTaskDefinition(task);
-            return;
-        }
-
-        boolean changed = false;
-
-        if (!taskName.equals(task.getName())) {
-            task.setName(taskName);
-            changed = true;
-        }
-        if (!taskDescription.equals(task.getDescription())) {
-            task.setDescription(taskDescription);
-            changed = true;
-        }
-        if (!taskClass.equals(task.getTaskClass())) {
-            task.setTaskClass(taskClass);
-            changed = true;
-        }
-
-        if (changed) {
-            schedulerService.saveTaskDefinition(task);
-        }
-    }
-
     private DesignConfig resolveLegacyDesignConfig(File legacyRootDir, DesignRefConfig designRef) throws Exception {
         if (designRef == null) {
             throw new IllegalArgumentException("Design reference is required");
@@ -2993,56 +2885,6 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         }
 
         return importReportsFromDirectory(reportsDir);
-    }
-
-    @Override
-    public void ensureLegacyReportsImported() {
-        // This method would be called during module startup to ensure
-        // all legacy reports are imported into the system
-
-        // Implementation would check if reports have already been imported
-        // and only import new or updated reports
-
-        // For now, this is a placeholder for the startup import logic
-    }
-
-    // =========================
-    // Generic Report Import (from GenericReportImportService)
-    // =========================
-
-    // Generic report import service instance
-    private GenericReportImportService genericReportImportService;
-
-    private GenericReportImportService getGenericReportImportService() {
-        if (genericReportImportService == null) {
-            genericReportImportService = new GenericReportImportService();
-            // Manually inject the DAO since we're not using Spring for this instance
-            genericReportImportService.setReportBuilderDAO(dao);
-        }
-        return genericReportImportService;
-    }
-
-    @Override
-    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
-    public List<org.openmrs.module.reportbuilder.legacyconfig.generic.ReportImportResult> importAllGenericReports() {
-        return getGenericReportImportService().importAllGenericReports();
-    }
-
-    @Override
-    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
-    public org.openmrs.module.reportbuilder.legacyconfig.generic.ReportImportResult importGenericReportFromFile(File jsonFile) {
-        return getGenericReportImportService().importGenericReportFromFile(jsonFile);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public boolean areGenericReportsAlreadyImported() {
-        return genericReportImportService.areGenericReportsAlreadyImported();
-    }
-
-    @Override
-    public void ensureImportAllGenericReportsTaskExists() {
-        genericReportImportService.ensureImportAllGenericReportsTaskExists();
     }
 
     // =========================================================
@@ -4471,6 +4313,171 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
             log.error("Failed to import serialized report from file: {}", reportFile.getAbsolutePath(), e);
             throw new APIException("Failed to import serialized report from file: " + e.getMessage(), e);
         }
+    }
+
+    @Override
+    public CompiledReportsImportSummary importAllCompiledReports(File sourceDir) {
+        // Determine source directory (default to import directory)
+        if (sourceDir == null) {
+            sourceDir = getDefaultImportDirectory();
+        }
+        if (!sourceDir.exists() || !sourceDir.isDirectory()) {
+            throw new IllegalArgumentException("Invalid source directory: " + sourceDir.getAbsolutePath());
+        }
+
+        // Look for compiled reports in the reports subdirectory
+        File reportsDir = new File(sourceDir, "configuration" + File.separator + "reports");
+        if (!reportsDir.exists() || !reportsDir.isDirectory()) {
+            throw new IllegalArgumentException("No reports directory found at: " + reportsDir.getAbsolutePath());
+        }
+
+        log.info("Importing compiled reports from: {}", reportsDir.getAbsolutePath());
+
+        CompiledReportsImportSummary summary = new CompiledReportsImportSummary();
+        summary.setSourceDirectory(reportsDir.getAbsolutePath());
+
+        // Walk every .json under configuration/reports - including distribution packages
+        // shipped under dist/{aggregates,linelist} by the export flow.
+        List<File> candidateFiles = new ArrayList<File>();
+        collectJsonFiles(reportsDir, candidateFiles);
+
+        for (File reportFile : candidateFiles) {
+            try {
+                JsonNode root = readRoot(reportFile);
+                if (root == null || !root.isObject()) {
+                    // Unparseable/non-object JSON - cannot be a report at all.
+                    summary.setSkippedCount(summary.getSkippedCount() + 1);
+                    log.warn("Skipping unrecognized JSON file: {}", reportFile.getAbsolutePath());
+                    continue;
+                }
+
+                CompiledReportArtifacts result;
+                if (root.has("uuid") && root.has("config")) {
+                    // Shipped SerializedReport wrapper (export flow, under dist/).
+                    log.info("Importing shipped compiled report: {}", reportFile.getName());
+                    result = importSerializedReport(reportFile, null);
+                } else {
+                    // Raw compiled design produced by compile - the canonical folder is itself a
+                    // valid package. Synthesize a SerializedReport for entity-level import.
+                    log.info("Importing raw compiled design: {}", reportFile.getName());
+                    SerializedReport serializedReport = toSerializedReport(root, reportFile);
+                    result = importSerializedReportFromObject(serializedReport, null);
+                }
+
+                CompiledReportImportEntry entry = new CompiledReportImportEntry();
+                if (result.getReportBuilderReport() != null) {
+                    entry.setUuid(result.getReportBuilderReport().getUuid());
+                    entry.setName(result.getReportBuilderReport().getName());
+                    entry.setCode(result.getReportBuilderReport().getCode());
+
+                    // Create or update the linked ReportLibrary entry for this report, pointing
+                    // it at the definition actually saved by this import (carries the
+                    // package-stamped reportDefinitionUuid).
+                    saveOrUpdateLibraryEntry(result.getReportBuilderReport().getUuid(),
+                        result.getReportDefinition() != null ? result.getReportDefinition().getUuid() : null);
+                }
+                if (result.getReportDefinition() != null) {
+                    entry.setReportDefinitionUuid(result.getReportDefinition().getUuid());
+                }
+                entry.setFileName(reportFile.getName());
+                summary.getImportedReports().add(entry);
+
+                summary.setSuccessCount(summary.getSuccessCount() + 1);
+                log.info("Successfully imported compiled report: {}", reportFile.getName());
+
+            } catch (Exception e) {
+                summary.setErrorCount(summary.getErrorCount() + 1);
+                summary.getErrors().add(reportFile.getName() + ": " + e.getMessage());
+                log.error("Failed to import compiled report: {}", reportFile.getName(), e);
+                try {
+                    Context.clearSession();
+                } catch (Exception inner) {
+                    log.debug("Failed to clear session after import error", inner);
+                }
+            }
+        }
+
+        log.info("Compiled report import complete: {} succeeded, {} failed ({} unrecognized files skipped)",
+            summary.getSuccessCount(), summary.getErrorCount(), summary.getSkippedCount());
+        return summary;
+    }
+
+    /**
+     * Recursively collects .json files under dir.
+     */
+    private void collectJsonFiles(File dir, List<File> out) {
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            if (child.isDirectory()) {
+                collectJsonFiles(child, out);
+            } else if (child.getName().endsWith(".json")) {
+                out.add(child);
+            }
+        }
+    }
+
+    /**
+     * Parses a JSON file, returning null when it is unreadable or not valid JSON.
+     */
+    private JsonNode readRoot(File file) {
+        try {
+            return new ObjectMapper().readTree(file);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String textOrNull(JsonNode node, String field) {
+        if (node != null && node.hasNonNull(field)) {
+            String value = node.get(field).asText();
+            return value == null || value.trim().isEmpty() ? null : value;
+        }
+        return null;
+    }
+
+    /**
+     * Builds a SerializedReport from a raw compiled design file. Identity comes from the stamped
+     * flat keys written at compile time (name, code, category, reportType,
+     * reportBuilderReportUuid). Falls back to the filename and folder location (linelist vs other)
+     * for files compiled before identity stamping existed.
+     */
+    private SerializedReport toSerializedReport(JsonNode root, File reportFile) {
+        SerializedReport serialized = new SerializedReport();
+
+        String fallbackName = reportFile.getName();
+        if (fallbackName.endsWith(".json")) {
+            fallbackName = fallbackName.substring(0, fallbackName.length() - ".json".length());
+        }
+
+        String name = textOrNull(root, "name");
+        serialized.setName(name != null ? name : fallbackName);
+        serialized.setCode(textOrNull(root, "code"));
+        serialized.setDescription(textOrNull(root, "description"));
+        serialized.setCategory(textOrNull(root, "category"));
+        serialized.setCategoryUuid(textOrNull(root, "categoryUuid"));
+
+        // Identity uuid stamped by the source instance keeps imports idempotent across sites.
+        String builderUuid = textOrNull(root, "reportBuilderReportUuid");
+        if (builderUuid != null) {
+            serialized.setUuid(builderUuid);
+        }
+
+        // Explicit stamping wins over folder inference; enum parsing tolerates LINELIST/LINE_LIST.
+        String stampedType = textOrNull(root, "reportType");
+        if (stampedType != null) {
+            serialized.setReportType(ReportBuilderReport.ReportType.fromString(stampedType).name());
+        } else {
+            File parent = reportFile.getParentFile();
+            boolean linelistFolder = parent != null && "linelist".equalsIgnoreCase(parent.getName());
+            serialized.setReportType(linelistFolder ? "LINE_LIST" : "AGGREGATE");
+        }
+
+        serialized.setStatus("COMPILED");
+        serialized.setConfig((ObjectNode) root);
+        return serialized;
     }
 
     /**

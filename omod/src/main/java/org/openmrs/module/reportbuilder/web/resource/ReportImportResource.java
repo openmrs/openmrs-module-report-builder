@@ -11,10 +11,8 @@ package org.openmrs.module.reportbuilder.web.resource;
 
 import org.openmrs.api.context.Context;
 import org.openmrs.module.reportbuilder.api.ReportBuilderService;
-import org.openmrs.module.reportbuilder.model.ReportBuilderReport;
 import org.openmrs.module.reportbuilder.web.controller.dto.ImportRequest;
 import org.openmrs.module.reportbuilder.web.controller.dto.ImportResult;
-import org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport;
 import org.openmrs.module.webservices.rest.SimpleObject;
 import org.openmrs.module.webservices.rest.web.RequestContext;
 import org.openmrs.module.webservices.rest.web.RestConstants;
@@ -219,103 +217,43 @@ public class ReportImportResource extends DelegatingCrudResource<ImportResult> {
 	}
 	
 	/**
-	 * Import compiled reports from configuration/reports/ directory
+	 * Import compiled reports from configuration/reports/ directory. Delegates the actual walk and
+	 * per-file import to the service so scheduled tasks share the same logic.
 	 */
 	private Object importCompiledReports(ImportRequest request) {
 		try {
-			// Determine source directory (default to import directory)
-			File sourceDir;
+			// Determine source directory (null lets the service fall back to its default)
+			File sourceDir = null;
 			if (request.getSourceDirectory() != null && !request.getSourceDirectory().trim().isEmpty()) {
 				sourceDir = new File(request.getSourceDirectory());
-			} else {
-				sourceDir = getImportService().getDefaultImportDirectory();
 			}
 			
-			// Look for compiled reports in the reports subdirectory
-			File reportsDir = new File(sourceDir, "configuration" + File.separator + "reports");
-			if (!reportsDir.exists() || !reportsDir.isDirectory()) {
-				throw new IllegalArgumentException("No reports directory found at: " + reportsDir.getAbsolutePath());
-			}
-			
-			log.info("Importing compiled reports from: {}", reportsDir.getAbsolutePath());
-			
-			int successCount = 0;
-			int errorCount = 0;
-			int skippedCount = 0;
-			List<SimpleObject> importedReports = new ArrayList<SimpleObject>();
-			
-			// Walk every .json under configuration/reports - including distribution packages
-			// shipped under dist/{aggregates,linelist} by the export flow.
-			List<File> candidateFiles = new ArrayList<File>();
-			collectJsonFiles(reportsDir, candidateFiles);
-			
-			for (File reportFile : candidateFiles) {
-				try {
-					com.fasterxml.jackson.databind.JsonNode root = readRoot(reportFile);
-					if (root == null || !root.isObject()) {
-						// Unparseable/non-object JSON - cannot be a report at all.
-						skippedCount++;
-						log.warn("Skipping unrecognized JSON file: {}", reportFile.getAbsolutePath());
-						continue;
-					}
-					
-					ReportBuilderService.CompiledReportArtifacts result;
-					if (root.has("uuid") && root.has("config")) {
-						// Shipped SerializedReport wrapper (export flow, under dist/).
-						log.info("Importing shipped compiled report: {}", reportFile.getName());
-						result = getImportService().importSerializedReport(reportFile, null);
-					} else {
-						// Raw compiled design produced by compile - the canonical folder is itself a
-						// valid package. Synthesize a SerializedReport for entity-level import.
-						log.info("Importing raw compiled design: {}", reportFile.getName());
-						SerializedReport serializedReport = toSerializedReport(root, reportFile);
-						result = getImportService().importSerializedReportFromObject(serializedReport, null);
-					}
-					
-					SimpleObject reportInfo = new SimpleObject();
-					if (result.getReportBuilderReport() != null) {
-						reportInfo.put("uuid", result.getReportBuilderReport().getUuid());
-						reportInfo.put("name", result.getReportBuilderReport().getName());
-						reportInfo.put("code", result.getReportBuilderReport().getCode());
-						
-						// Create or update the linked ReportLibrary entry for this report, pointing
-						// it at the definition actually saved by this import (carries the
-						// package-stamped reportDefinitionUuid).
-						getImportService().saveOrUpdateLibraryEntry(result.getReportBuilderReport().getUuid(),
-						    result.getReportDefinition() != null ? result.getReportDefinition().getUuid() : null);
-					}
-					if (result.getReportDefinition() != null) {
-						reportInfo.put("reportDefinitionUuid", result.getReportDefinition().getUuid());
-					}
-					reportInfo.put("file", reportFile.getName());
-					importedReports.add(reportInfo);
-					
-					successCount++;
-					log.info("Successfully imported compiled report: {}", reportFile.getName());
-					
-				}
-				catch (Exception e) {
-					errorCount++;
-					log.error("Failed to import compiled report: {}", reportFile.getName(), e);
-					try {
-						Context.clearSession();
-					}
-					catch (Exception inner) {
-						log.debug("Failed to clear session after import error", inner);
-					}
-				}
-			}
+			ReportBuilderService.CompiledReportsImportSummary summary = getImportService().importAllCompiledReports(
+			    sourceDir);
 			
 			// Build response
 			SimpleObject response = new SimpleObject();
-			response.put("success", errorCount == 0);
-			response.put("message", String.format("Imported %d compiled reports, %d failed (%d unrecognized files skipped)",
-			    successCount, errorCount, skippedCount));
-			response.put("sourceDirectory", reportsDir.getAbsolutePath());
+			response.put("success", summary.getErrorCount() == 0);
+			response.put(
+			    "message",
+			    String.format("Imported %d compiled reports, %d failed (%d unrecognized files skipped)",
+			        summary.getSuccessCount(), summary.getErrorCount(), summary.getSkippedCount()));
+			response.put("sourceDirectory", summary.getSourceDirectory());
+			
+			List<SimpleObject> importedReports = new ArrayList<SimpleObject>();
+			for (ReportBuilderService.CompiledReportImportEntry entry : summary.getImportedReports()) {
+				SimpleObject reportInfo = new SimpleObject();
+				reportInfo.put("uuid", entry.getUuid());
+				reportInfo.put("name", entry.getName());
+				reportInfo.put("code", entry.getCode());
+				reportInfo.put("reportDefinitionUuid", entry.getReportDefinitionUuid());
+				reportInfo.put("file", entry.getFileName());
+				importedReports.add(reportInfo);
+			}
 			response.put("importedReports", importedReports);
-			response.put("successCount", successCount);
-			response.put("errorCount", errorCount);
-			response.put("skippedCount", skippedCount);
+			response.put("successCount", summary.getSuccessCount());
+			response.put("errorCount", summary.getErrorCount());
+			response.put("skippedCount", summary.getSkippedCount());
 			
 			return response;
 		}
@@ -325,87 +263,6 @@ public class ReportImportResource extends DelegatingCrudResource<ImportResult> {
 			response.put("message", "Failed to import compiled reports: " + e.getMessage());
 			return response;
 		}
-	}
-	
-	/**
-	 * Recursively collects .json files under dir. - Java 7 compatible
-	 */
-	private void collectJsonFiles(File dir, List<File> out) {
-		File[] children = dir.listFiles();
-		if (children == null) {
-			return;
-		}
-		for (File child : children) {
-			if (child.isDirectory()) {
-				collectJsonFiles(child, out);
-			} else if (child.getName().endsWith(".json")) {
-				out.add(child);
-			}
-		}
-	}
-	
-	/**
-	 * Parses a JSON file, returning null when it is unreadable or not valid JSON.
-	 */
-	private com.fasterxml.jackson.databind.JsonNode readRoot(File file) {
-		try {
-			return new com.fasterxml.jackson.databind.ObjectMapper().readTree(file);
-		}
-		catch (Exception e) {
-			return null;
-		}
-	}
-	
-	private String textOrNull(com.fasterxml.jackson.databind.JsonNode node, String field) {
-		if (node != null && node.hasNonNull(field)) {
-			String value = node.get(field).asText();
-			return value == null || value.trim().isEmpty() ? null : value;
-		}
-		return null;
-	}
-	
-	/**
-	 * Builds a SerializedReport from a raw compiled design file. Identity comes from the stamped
-	 * flat keys written at compile time (name, code, category, reportType,
-	 * reportBuilderReportUuid). Falls back to the filename and folder location (linelist vs other)
-	 * for files compiled before identity stamping existed.
-	 */
-	private org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport toSerializedReport(
-	        com.fasterxml.jackson.databind.JsonNode root, File reportFile) {
-		
-		org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport serialized = new org.openmrs.module.reportbuilder.web.controller.dto.SerializedReport();
-		
-		String fallbackName = reportFile.getName();
-		if (fallbackName.endsWith(".json")) {
-			fallbackName = fallbackName.substring(0, fallbackName.length() - ".json".length());
-		}
-		
-		String name = textOrNull(root, "name");
-		serialized.setName(name != null ? name : fallbackName);
-		serialized.setCode(textOrNull(root, "code"));
-		serialized.setDescription(textOrNull(root, "description"));
-		serialized.setCategory(textOrNull(root, "category"));
-		serialized.setCategoryUuid(textOrNull(root, "categoryUuid"));
-		
-		// Identity uuid stamped by the source instance keeps imports idempotent across sites.
-		String builderUuid = textOrNull(root, "reportBuilderReportUuid");
-		if (builderUuid != null) {
-			serialized.setUuid(builderUuid);
-		}
-		
-		// Explicit stamping wins over folder inference; enum parsing tolerates LINELIST/LINE_LIST.
-		String stampedType = textOrNull(root, "reportType");
-		if (stampedType != null) {
-			serialized.setReportType(ReportBuilderReport.ReportType.fromString(stampedType).name());
-		} else {
-			File parent = reportFile.getParentFile();
-			boolean linelistFolder = parent != null && "linelist".equalsIgnoreCase(parent.getName());
-			serialized.setReportType(linelistFolder ? "LINE_LIST" : "AGGREGATE");
-		}
-		
-		serialized.setStatus("COMPILED");
-		serialized.setConfig((com.fasterxml.jackson.databind.node.ObjectNode) root);
-		return serialized;
 	}
 	
 }

@@ -411,14 +411,6 @@ public interface ReportBuilderService extends OpenmrsService {
 	void purgeReportLibrary(ReportLibrary reportLibrary);
 	
 	/**
-	 * Add a generic report to the report library
-	 */
-	@Transactional
-	@Authorized({ "Task: reportbuilder.library.add", "Task: reportbuilder.library.edit" })
-	void addGenericReportToLibrary(String reportDefinitionUuid, String name, String description, String code,
-	        ReportCategory category, ReportBuilderReport.ReportType reportType);
-	
-	/**
 	 * Clean up broken report library entries where ReportDefinition doesn't exist
 	 * 
 	 * @return Number of entries cleaned up
@@ -512,9 +504,6 @@ public interface ReportBuilderService extends OpenmrsService {
 	@Authorized("Task: reportbuilder.package.import")
 	List<ReportImportResult> importAllRuntimeLegacyReportPackages() throws Exception;
 	
-	@Authorized("Task: reportbuilder.package.import")
-	void ensureImportAllLegacyReportsTaskExists();
-	
 	// =========================
 	// Legacy Report Import (from LegacyReportImportService)
 	// =========================
@@ -566,47 +555,6 @@ public interface ReportBuilderService extends OpenmrsService {
 	@Authorized("Task: reportbuilder.package.import")
 	List<org.openmrs.module.reporting.report.definition.ReportDefinition> importUgandaEMRLegacyReports(
 	        String legacyReportsPath);
-	
-	/**
-	 * Ensure that all legacy reports are imported on module startup
-	 */
-	@Authorized("Task: reportbuilder.package.import")
-	void ensureLegacyReportsImported();
-	
-	// =========================
-	// Generic Report Import (from GenericReportImportService)
-	// =========================
-	
-	/**
-	 * Import all generic reports from runtime directory
-	 * 
-	 * @return List of import results
-	 */
-	@Authorized("Task: reportbuilder.package.import")
-	List<org.openmrs.module.reportbuilder.legacyconfig.generic.ReportImportResult> importAllGenericReports();
-	
-	/**
-	 * Import a single generic report from file
-	 * 
-	 * @param jsonFile The JSON file to import
-	 * @return Import result
-	 */
-	@Authorized("Task: reportbuilder.package.import")
-	org.openmrs.module.reportbuilder.legacyconfig.generic.ReportImportResult importGenericReportFromFile(File jsonFile);
-	
-	/**
-	 * Check if generic reports have already been imported
-	 * 
-	 * @return true if reports are already imported
-	 */
-	@Authorized("Task: reportbuilder.package.import")
-	boolean areGenericReportsAlreadyImported();
-	
-	/**
-	 * Ensure generic reports import task exists
-	 */
-	@Authorized("Task: reportbuilder.package.import")
-	void ensureImportAllGenericReportsTaskExists();
 	
 	// =========================================================
 	// Legacy Reports
@@ -1092,6 +1040,141 @@ public interface ReportBuilderService extends OpenmrsService {
 	 */
 	@Authorized("Task: reportbuilder.report.compile")
 	CompiledReportArtifacts importSerializedReportFromObject(SerializedReport serializedReport, String categoryUuid);
+	
+	/**
+	 * Bulk import every compiled report found as a .json file under the given source directory,
+	 * recursively - including distribution packages shipped under dist/{aggregates,linelist} by the
+	 * export flow. Both shipped SerializedReport wrappers and raw compiled designs are handled, and
+	 * the report library entry is refreshed for each imported report. This is the canonical bulk
+	 * import used by the REST import resource and the scheduled import task.
+	 * 
+	 * @param sourceDir Root directory to scan; when null the default import directory is used
+	 * @return Summary of the bulk import
+	 */
+	@Authorized("Task: reportbuilder.package.import")
+	CompiledReportsImportSummary importAllCompiledReports(File sourceDir);
+	
+	/**
+	 * Per-report record of a bulk compiled report import.
+	 */
+	class CompiledReportImportEntry {
+		
+		private String uuid;
+		
+		private String name;
+		
+		private String code;
+		
+		private String reportDefinitionUuid;
+		
+		private String fileName;
+		
+		public String getUuid() {
+			return uuid;
+		}
+		
+		public void setUuid(String uuid) {
+			this.uuid = uuid;
+		}
+		
+		public String getName() {
+			return name;
+		}
+		
+		public void setName(String name) {
+			this.name = name;
+		}
+		
+		public String getCode() {
+			return code;
+		}
+		
+		public void setCode(String code) {
+			this.code = code;
+		}
+		
+		public String getReportDefinitionUuid() {
+			return reportDefinitionUuid;
+		}
+		
+		public void setReportDefinitionUuid(String reportDefinitionUuid) {
+			this.reportDefinitionUuid = reportDefinitionUuid;
+		}
+		
+		public String getFileName() {
+			return fileName;
+		}
+		
+		public void setFileName(String fileName) {
+			this.fileName = fileName;
+		}
+	}
+	
+	/**
+	 * Summary of a bulk compiled report import - see {@link #importAllCompiledReports(File)}.
+	 */
+	class CompiledReportsImportSummary {
+		
+		private String sourceDirectory;
+		
+		private int successCount;
+		
+		private int errorCount;
+		
+		private int skippedCount;
+		
+		private List<CompiledReportImportEntry> importedReports = new java.util.ArrayList<CompiledReportImportEntry>();
+		
+		private List<String> errors = new java.util.ArrayList<String>();
+		
+		public String getSourceDirectory() {
+			return sourceDirectory;
+		}
+		
+		public void setSourceDirectory(String sourceDirectory) {
+			this.sourceDirectory = sourceDirectory;
+		}
+		
+		public int getSuccessCount() {
+			return successCount;
+		}
+		
+		public void setSuccessCount(int successCount) {
+			this.successCount = successCount;
+		}
+		
+		public int getErrorCount() {
+			return errorCount;
+		}
+		
+		public void setErrorCount(int errorCount) {
+			this.errorCount = errorCount;
+		}
+		
+		public int getSkippedCount() {
+			return skippedCount;
+		}
+		
+		public void setSkippedCount(int skippedCount) {
+			this.skippedCount = skippedCount;
+		}
+		
+		public List<CompiledReportImportEntry> getImportedReports() {
+			return importedReports;
+		}
+		
+		public void setImportedReports(List<CompiledReportImportEntry> importedReports) {
+			this.importedReports = importedReports;
+		}
+		
+		public List<String> getErrors() {
+			return errors;
+		}
+		
+		public void setErrors(List<String> errors) {
+			this.errors = errors;
+		}
+	}
 	
 	/**
 	 * Creates or updates the ReportLibrary entry linked to a builder report, syncing name, code,
