@@ -3926,6 +3926,139 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
             "age-groups", "etl-sources", "etl-monitors", "indicators", "sections", "themes", "reports", "dashboards", "library");
 
     /**
+     * Directory names that classify entity files during import, in {@link #IMPORT_ORDER}. Used by
+     * the recursive layout walker so content packs can nest their entity directories at any depth.
+     */
+    private static final java.util.Set<String> ENTITY_TYPES = new java.util.LinkedHashSet<String>(IMPORT_ORDER);
+
+    /**
+     * Locates every reportbuilder root under sourceDir: the canonical configuration/reportbuilder
+     * plus any configuration/{pack}/reportbuilder subtree shipped by a content pack. The canonical
+     * root comes first, pack roots follow sorted by pack directory name; roots are deduplicated by
+     * canonical path. An empty list means the source holds no reportbuilder content at all.
+     */
+    java.util.List<File> locateReportBuilderRoots(File sourceDir) {
+        java.util.List<File> roots = new ArrayList<File>();
+        java.util.Set<String> seen = new java.util.HashSet<String>();
+        File configurationDir = new File(sourceDir, "configuration");
+        addDiscoveredRoot(roots, seen, new File(configurationDir, "reportbuilder"));
+
+        File[] packDirs = configurationDir.listFiles(File::isDirectory);
+        if (packDirs != null) {
+            java.util.Arrays.sort(packDirs, (a, b) -> a.getName().compareTo(b.getName()));
+            for (File packDir : packDirs) {
+                if (!"reportbuilder".equals(packDir.getName())) {
+                    addDiscoveredRoot(roots, seen, new File(packDir, "reportbuilder"));
+                }
+            }
+        }
+        return roots;
+    }
+
+    private void addDiscoveredRoot(java.util.List<File> roots, java.util.Set<String> seen, File candidate) {
+        if (!candidate.isDirectory()) {
+            return;
+        }
+        try {
+            if (seen.add(candidate.getCanonicalPath())) {
+                roots.add(candidate);
+            }
+        }
+        catch (Exception e) {
+            log.debug("Could not resolve canonical path of discovered root: {}", candidate.getAbsolutePath(), e);
+        }
+    }
+
+    /**
+     * Locates every compiled-reports root under sourceDir: the canonical configuration/reports plus
+     * any configuration/{pack}/reports subtree shipped by a content pack. The canonical root comes
+     * first, pack roots follow sorted by pack directory name; roots are deduplicated by canonical
+     * path. An empty list means the source holds no compiled reports at all.
+     */
+    java.util.List<File> locateReportsRoots(File sourceDir) {
+        java.util.List<File> roots = new ArrayList<File>();
+        java.util.Set<String> seen = new java.util.HashSet<String>();
+        File configurationDir = new File(sourceDir, "configuration");
+        addDiscoveredRoot(roots, seen, new File(configurationDir, "reports"));
+
+        File[] packDirs = configurationDir.listFiles(File::isDirectory);
+        if (packDirs != null) {
+            java.util.Arrays.sort(packDirs, (a, b) -> a.getName().compareTo(b.getName()));
+            for (File packDir : packDirs) {
+                if (!"reports".equals(packDir.getName())) {
+                    addDiscoveredRoot(roots, seen, new File(packDir, "reports"));
+                }
+            }
+        }
+        return roots;
+    }
+
+    /**
+     * Collects every candidate compiled-report .json under all reports roots of sourceDir,
+     * mirroring the multi-root discovery the entity import uses so content packs can ship their
+     * compiled reports anywhere under configuration. Empty when the source holds no reports
+     * directory at all.
+     */
+    java.util.List<File> collectCompiledReportFiles(File sourceDir) {
+        java.util.List<File> candidateFiles = new ArrayList<File>();
+        for (File reportsRoot : locateReportsRoots(sourceDir)) {
+            collectJsonFiles(reportsRoot, candidateFiles);
+        }
+        return candidateFiles;
+    }
+
+    /**
+     * Walks a reportbuilder root recursively and classifies every .json file by its nearest
+     * ancestor directory named after a known entity type. This is what makes content packs work:
+     * reportbuilder/contentpackname/indicators/x.json classifies as indicators exactly like the canonical
+     * flat reportbuilder/indicators/x.json, multiple pack subtrees merge in one pass, and the pack
+     * names themselves are irrelevant. Files named version.json are collected into manifestFiles
+     * instead of any entity bucket. A .json with no entity-type directory in its path is skipped
+     * with a warning rather than content-sniffed - entity JSON shapes overlap across types, so
+     * sniffing would risk misfiling rows. Each bucket is sorted by absolute path for deterministic
+     * import order.
+     */
+    java.util.Map<String, java.util.List<File>> classifyEntityFiles(File reportbuilderRoot,
+            java.util.List<File> manifestFiles) {
+        java.util.Map<String, java.util.List<File>> byType = new java.util.LinkedHashMap<String, java.util.List<File>>();
+        classifyEntityFilesRecursive(reportbuilderRoot, null, byType, manifestFiles);
+        for (java.util.List<File> files : byType.values()) {
+            files.sort((a, b) -> a.getAbsolutePath().compareTo(b.getAbsolutePath()));
+        }
+        return byType;
+    }
+
+    private void classifyEntityFilesRecursive(File dir, String currentType,
+            java.util.Map<String, java.util.List<File>> byType, java.util.List<File> manifestFiles) {
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return;
+        }
+        for (File child : children) {
+            if (child.isDirectory()) {
+                // Nearest ancestor wins: descending into a directory named like a known entity
+                // type re-binds the classification from here down.
+                String nextType = ENTITY_TYPES.contains(child.getName()) ? child.getName() : currentType;
+                classifyEntityFilesRecursive(child, nextType, byType, manifestFiles);
+            } else if (child.getName().endsWith(".json")) {
+                if ("version.json".equals(child.getName())) {
+                    manifestFiles.add(child);
+                } else if (currentType != null) {
+                    java.util.List<File> bucket = byType.get(currentType);
+                    if (bucket == null) {
+                        bucket = new ArrayList<File>();
+                        byType.put(currentType, bucket);
+                    }
+                    bucket.add(child);
+                } else {
+                    log.warn("Skipping JSON file with no recognized entity-type directory in its path: {}",
+                        child.getAbsolutePath());
+                }
+            }
+        }
+    }
+
+    /**
      * Imports a distribution package directory. Each entity file is imported in its own independent
      * transaction (REQUIRES_NEW), so a failure rolls back and is reported for that item only while
      * every other item still commits. Runs with NOT_SUPPORTED so a caller's transaction, if any, is
@@ -3942,17 +4075,36 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         try {
             log.info("Starting import from directory: {}", sourceDir.getAbsolutePath());
 
-            // Validate directory structure - look for configuration/reportbuilder
-            File configDir = new File(sourceDir, "configuration");
-            File reportbuilderDir = new File(configDir, "reportbuilder");
-            if (!reportbuilderDir.exists()) {
+            // Discover reportbuilder roots: the canonical configuration/reportbuilder plus any
+            // configuration/{pack}/reportbuilder subtree shipped by a content pack.
+            java.util.List<File> reportbuilderRoots = locateReportBuilderRoots(sourceDir);
+            if (reportbuilderRoots.isEmpty()) {
                 result.setSuccess(false);
-                result.setSummary("Invalid distribution package: missing configuration/reportbuilder directory");
+                result.setSummary("Invalid distribution package: no configuration/reportbuilder directory found");
                 return result;
             }
 
+            // Classify entity files recursively across all roots - content packs may nest their
+            // entity directories at any depth and multiple packs merge into one import.
+            java.util.List<File> manifestFiles = new ArrayList<File>();
+            java.util.Map<String, java.util.List<File>> entitiesByType = new java.util.LinkedHashMap<String, java.util.List<File>>();
+            for (File root : reportbuilderRoots) {
+                java.util.Map<String, java.util.List<File>> rootEntities = classifyEntityFiles(root, manifestFiles);
+                for (java.util.Map.Entry<String, java.util.List<File>> entry : rootEntities.entrySet()) {
+                    java.util.List<File> merged = entitiesByType.get(entry.getKey());
+                    if (merged == null) {
+                        merged = new ArrayList<File>();
+                        entitiesByType.put(entry.getKey(), merged);
+                    }
+                    merged.addAll(entry.getValue());
+                }
+            }
+            for (java.util.List<File> files : entitiesByType.values()) {
+                files.sort((a, b) -> a.getAbsolutePath().compareTo(b.getAbsolutePath()));
+            }
+
             // Read version manifest if available
-            VersionMetadata versionManifest = readVersionManifest(reportbuilderDir);
+            VersionMetadata versionManifest = readVersionManifest(reportbuilderRoots.get(0));
             if (versionManifest != null && versionManifest.getPackageInfo() != null) {
                 log.info("Found version manifest: {} version {}", versionManifest.getPackageInfo().getName(),
                         versionManifest.getPackageInfo().getVersion());
@@ -3960,20 +4112,28 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                 result.setSummary(String.format("Importing package: %s v%s from %s", versionManifest.getPackageInfo()
                         .getName(), versionManifest.getPackageInfo().getVersion(), sourceDir.getAbsolutePath()));
             }
-
-            // Import in dependency order
-            for (String type : IMPORT_ORDER) {
-                File typeDir = new File(reportbuilderDir, type);
-                if (typeDir.exists() && typeDir.isDirectory()) {
-                    importType(type, typeDir, result, template);
+            // Manifests found inside pack subtrees are informational only.
+            for (File manifestFile : manifestFiles) {
+                if (!manifestFile.getParentFile().equals(reportbuilderRoots.get(0))) {
+                    VersionMetadata packManifest = readVersionManifest(manifestFile.getParentFile());
+                    if (packManifest != null && packManifest.getPackageInfo() != null) {
+                        log.info("Found additional pack manifest: {} version {} ({})",
+                            packManifest.getPackageInfo().getName(), packManifest.getPackageInfo().getVersion(),
+                            manifestFile.getAbsolutePath());
+                    }
                 }
             }
 
-            // Import compiled reports from configuration/reports
-            File reportsDir = new File(configDir, "reports");
-            if (reportsDir.exists()) {
-                importCompiledReports(reportsDir, result);
+            // Import in dependency order
+            for (String type : IMPORT_ORDER) {
+                java.util.List<File> typeFiles = entitiesByType.get(type);
+                if (typeFiles != null && !typeFiles.isEmpty()) {
+                    importEntities(type, typeFiles, result, template);
+                }
             }
+
+            // Compiled reports are imported through importAllCompiledReports (REST type
+            // "compiledReports"), which walks all reports roots including content-pack subtrees.
 
             // Update summary
             int successCount = result.getSuccessCount();
@@ -4074,21 +4234,24 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
     @Override
     public boolean validatePackage(File sourceDir) {
         try {
-            // Look for configuration/reportbuilder directory
-            File configDir = new File(sourceDir, "configuration");
-            File reportbuilderDir = new File(configDir, "reportbuilder");
-            if (!reportbuilderDir.exists() || !reportbuilderDir.isDirectory()) {
+            // Discover reportbuilder roots the same way import does, so content-pack layouts
+            // (reportbuilder/{pack}/... and configuration/{pack}/reportbuilder/...) validate too.
+            java.util.List<File> reportbuilderRoots = locateReportBuilderRoots(sourceDir);
+            if (reportbuilderRoots.isEmpty()) {
                 log.warn("Invalid package: missing configuration/reportbuilder directory");
                 return false;
             }
 
-            // Check for at least one entity directory
+            // Check for at least one classifiable entity file across all roots
+            java.util.List<File> manifestFiles = new ArrayList<File>();
             boolean hasEntities = false;
-            for (String type : IMPORT_ORDER) {
-                File typeDir = new File(reportbuilderDir, type);
-                if (typeDir.exists() && typeDir.isDirectory() && typeDir.list().length > 0) {
-                    hasEntities = true;
-                    break;
+            for (File root : reportbuilderRoots) {
+                java.util.Map<String, java.util.List<File>> entitiesByType = classifyEntityFiles(root, manifestFiles);
+                for (String type : IMPORT_ORDER) {
+                    java.util.List<File> files = entitiesByType.get(type);
+                    if (files != null && !files.isEmpty()) {
+                        hasEntities = true;
+                    }
                 }
             }
 
@@ -4097,9 +4260,7 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                 return false;
             }
 
-            // Check for version file in reportbuilder directory
-            File versionFile = new File(reportbuilderDir, "version.json");
-            if (!versionFile.exists()) {
+            if (manifestFiles.isEmpty()) {
                 log.warn("Warning: missing version.json file");
             }
 
@@ -4326,20 +4487,27 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         }
 
         // Look for compiled reports in the reports subdirectory
-        File reportsDir = new File(sourceDir, "configuration" + File.separator + "reports");
-        if (!reportsDir.exists() || !reportsDir.isDirectory()) {
-            throw new IllegalArgumentException("No reports directory found at: " + reportsDir.getAbsolutePath());
+        // Discover compiled-reports roots the same way the entity import does: the canonical
+        // configuration/reports plus any configuration/{pack}/reports subtree shipped by a content
+        // pack. Mirrors the multi-root entity discovery above.
+        java.util.List<File> reportsRoots = locateReportsRoots(sourceDir);
+        if (reportsRoots.isEmpty()) {
+            throw new IllegalArgumentException("No reports directory found under: " + sourceDir.getAbsolutePath());
         }
 
-        log.info("Importing compiled reports from: {}", reportsDir.getAbsolutePath());
+        java.util.List<String> rootPaths = new ArrayList<String>();
+        for (File root : reportsRoots) {
+            rootPaths.add(root.getAbsolutePath());
+        }
+        log.info("Importing compiled reports from {} root(s): {}", reportsRoots.size(),
+            String.join(", ", rootPaths));
 
         CompiledReportsImportSummary summary = new CompiledReportsImportSummary();
-        summary.setSourceDirectory(reportsDir.getAbsolutePath());
+        summary.setSourceDirectory(String.join(", ", rootPaths));
 
-        // Walk every .json under configuration/reports - including distribution packages
-        // shipped under dist/{aggregates,linelist} by the export flow.
-        List<File> candidateFiles = new ArrayList<File>();
-        collectJsonFiles(reportsDir, candidateFiles);
+        // Walk every .json under all reports roots - including distribution packages shipped
+        // under dist/{aggregates,linelist} by the export flow.
+        List<File> candidateFiles = collectCompiledReportFiles(sourceDir);
 
         for (File reportFile : candidateFiles) {
             try {
@@ -5412,14 +5580,9 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
      * via the given template; a failure is isolated to its file and reported in the result while
      * all other files continue.
      */
-    private void importType(String type, File dir, ImportResult result, TransactionTemplate template) {
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
-
-        if (files == null || files.length == 0) {
-            return;
-        }
-
-        log.info("Importing {} entities from: {}", type, dir.getAbsolutePath());
+    private void importEntities(String type, java.util.List<File> files, ImportResult result,
+                                TransactionTemplate template) {
+        log.info("Importing {} entities: {} file(s)", type, files.size());
 
         for (File file : files) {
             String fileName = file.getName();
@@ -5481,35 +5644,6 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                 log.error("[IMPORT] Failed to import: type={}, file={}, error={}", type, fileName, describeFailure(e), e);
                 result.addError(type, fileName, describeFailure(e));
                 clearSessionAfterFailure();
-            }
-        }
-    }
-
-    /**
-     * Import compiled reports from reports directory
-     */
-    private void importCompiledReports(File reportsDir,
-                                       ImportResult result) {
-        File[] subdirs = reportsDir.listFiles(File::isDirectory);
-
-        if (subdirs == null) {
-            return;
-        }
-
-        for (File subdir : subdirs) {
-            if ("aggregates".equals(subdir.getName()) || "linelist".equals(subdir.getName())) {
-                File[] files = subdir.listFiles((d, name) -> name.endsWith(".json"));
-                if (files != null) {
-                    for (File file : files) {
-                        try {
-                            // Compiled reports are already handled in reports import
-                            // This is for reference only
-                            log.debug("Found compiled report: {}", file.getName());
-                        } catch (Exception e) {
-                            log.warn("Could not process compiled report: {}", file.getName(), e);
-                        }
-                    }
-                }
             }
         }
     }
@@ -5612,29 +5746,25 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
         // Import each library
         for (String libraryUuid : serializedReport.getDependencies().getLibraries()) {
             try {
-                // Look for library file in the expected location
-                File libraryDir = new File(importDir,
-                        "configuration" + File.separator + "reportbuilder" + File.separator + "library");
+                // Search library files recursively across all reportbuilder roots so library
+                // dependencies resolve from content-pack layouts too
+                java.util.List<File> libraryFiles = collectLibraryFiles(importDir);
 
-                if (libraryDir.exists() && libraryDir.isDirectory()) {
-                    File[] libraryFiles = libraryDir.listFiles((d, name) -> name.endsWith(".json"));
+                if (!libraryFiles.isEmpty()) {
+                    for (File libraryFile : libraryFiles) {
+                        try {
+                            JsonNode node = objectMapper.readTree(libraryFile);
+                            String fileUuid = node.path("uuid").asText(null);
 
-                    if (libraryFiles != null) {
-                        for (File libraryFile : libraryFiles) {
-                            try {
-                                JsonNode node = objectMapper.readTree(libraryFile);
-                                String fileUuid = node.path("uuid").asText(null);
-
-                                if (libraryUuid.equals(fileUuid)) {
-                                    log.info("Found library file for UUID: {}, importing: {}", libraryUuid,
-                                            libraryFile.getName());
-                                    importLibraryEntry(libraryFile);
-                                    break;
-                                }
-                            } catch (Exception e) {
-                                log.warn("Failed to read library file: {}", libraryFile.getName(), e);
-                                clearSessionAfterFailure();
+                            if (libraryUuid.equals(fileUuid)) {
+                                log.info("Found library file for UUID: {}, importing: {}", libraryUuid,
+                                        libraryFile.getName());
+                                importLibraryEntry(libraryFile);
+                                break;
                             }
+                        } catch (Exception e) {
+                            log.warn("Failed to read library file: {}", libraryFile.getName(), e);
+                            clearSessionAfterFailure();
                         }
                     }
                 }
@@ -5652,6 +5782,24 @@ public class ReportBuilderServiceImpl extends BaseOpenmrsService implements Repo
                 clearSessionAfterFailure();
             }
         }
+    }
+
+    /**
+     * Collects every library entity .json under all reportbuilder roots for importDir, at any
+     * nesting depth - so library dependencies resolve from content-pack layouts
+     * (reportbuilder/{pack}/library/... and configuration/{pack}/reportbuilder/library/...) as
+     * well as the canonical flat reportbuilder/library directory.
+     */
+    java.util.List<File> collectLibraryFiles(File importDir) {
+        java.util.List<File> libraryFiles = new ArrayList<File>();
+        for (File root : locateReportBuilderRoots(importDir)) {
+            java.util.Map<String, java.util.List<File>> byType = classifyEntityFiles(root, new ArrayList<File>());
+            java.util.List<File> files = byType.get("library");
+            if (files != null) {
+                libraryFiles.addAll(files);
+            }
+        }
+        return libraryFiles;
     }
 
     /**
